@@ -2,7 +2,20 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalise_db_url(v: str) -> str:
+    """Rewrite bare postgres:// or postgresql:// to use the psycopg3 driver.
+
+    Railway (and most PaaS) inject DATABASE_URL without a driver suffix.
+    SQLAlchemy would then try psycopg2 (not installed); we use psycopg v3.
+    """
+    for prefix in ("postgres://", "postgresql://"):
+        if v.startswith(prefix):
+            return "postgresql+psycopg://" + v[len(prefix):]
+    return v
 
 
 class Settings(BaseSettings):
@@ -14,6 +27,11 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     database_url: str = "postgresql+psycopg://citationpulse:citationpulse@localhost:5434/citationpulse_geo"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalise_database_url(cls, v: str) -> str:
+        return _normalise_db_url(v)
 
     # Postgres-backed Celery (no Redis required). Defaults derive from `database_url` at runtime
     # via `effective_celery_broker_url` / `effective_celery_result_backend`.
