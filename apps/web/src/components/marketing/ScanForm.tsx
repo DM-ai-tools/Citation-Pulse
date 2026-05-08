@@ -65,7 +65,7 @@ export function ScanForm({ className }: { className?: string }) {
     const tail = parts[parts.length - 1] ?? "";
     if (completed.length) {
       setPromptTags((prev) => {
-        let next = [...prev];
+        const next = [...prev];
         for (const t of completed) {
           if (next.length >= MAX_PROMPTS) {
             toast.error(`Maximum ${MAX_PROMPTS} prompts`);
@@ -88,7 +88,7 @@ export function ScanForm({ className }: { className?: string }) {
         .filter(Boolean);
       if (!parts.length) return;
       setPromptTags((prev) => {
-        let next = [...prev];
+        const next = [...prev];
         for (const t of parts) {
           if (next.length >= MAX_PROMPTS) {
             toast.error(`Maximum ${MAX_PROMPTS} prompts`);
@@ -115,7 +115,7 @@ export function ScanForm({ className }: { className?: string }) {
     const tail = parts[parts.length - 1] ?? "";
     if (completed.length) {
       setCompetitorTags((prev) => {
-        let next = [...prev];
+        const next = [...prev];
         for (const t of completed) {
           if (next.length >= MAX_COMPETITORS) {
             toast.error(`Maximum ${MAX_COMPETITORS} competitors`);
@@ -138,7 +138,7 @@ export function ScanForm({ className }: { className?: string }) {
         .filter(Boolean);
       if (!parts.length) return;
       setCompetitorTags((prev) => {
-        let next = [...prev];
+        const next = [...prev];
         for (const t of parts) {
           if (next.length >= MAX_COMPETITORS) {
             toast.error(`Maximum ${MAX_COMPETITORS} competitors`);
@@ -170,7 +170,7 @@ export function ScanForm({ className }: { className?: string }) {
       }
       compList = compList.slice(0, MAX_COMPETITORS);
 
-      let mergedPrompts = [...promptTags];
+      const mergedPrompts = [...promptTags];
       const pendingParts = promptInput
         .split(",")
         .map((s) => s.trim())

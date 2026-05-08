@@ -542,7 +542,7 @@ export default function DashboardPage() {
       if (hit) return hit.id;
     }
     return list[0]?.id ?? "";
-  }, [BRAND_ID_ENV, SITE_URL_ENV, brands.data, useScanReport]);
+  }, [brands.data, useScanReport]);
 
   const report = useQuery({
     queryKey: ["dashboard-scan-report", effectiveScanId],

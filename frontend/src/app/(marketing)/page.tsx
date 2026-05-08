@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { ScanForm } from "@/components/marketing/ScanForm";
 import { Container } from "@/components/layout/Container";
 

@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 export function PublicReportFooter() {
   return (
     <footer className="border-t border-slate-800 bg-tr-navy text-slate-400">
