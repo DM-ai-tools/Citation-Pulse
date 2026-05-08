@@ -18,24 +18,34 @@ Use them as copy/paste references in each Railway service's Config-as-Code or se
 
 ## Service setup
 
+Use **one GitHub repo** and create **3 Railway services** from it.  
+For each service, set a different **Root Directory** and Dockerfile so pip/npm stay separate.
+
+- API root directory: `apps/api`
+- Worker root directory: `apps/api`
+- Web root directory: `apps/web`
+
 ### 1) API service
 
 - Builder: `DOCKERFILE`
-- Dockerfile: `infra/docker/api.Dockerfile`
+- Root directory: `apps/api`
+- Dockerfile: `Dockerfile`
 - Start command: `uvicorn citationpulse.main:app --host 0.0.0.0 --port $PORT`
 - Healthcheck path: `/health`
 
 ### 2) Worker service
 
 - Builder: `DOCKERFILE`
-- Dockerfile: `infra/docker/worker.Dockerfile`
+- Root directory: `apps/api`
+- Dockerfile: `Dockerfile.worker`
 - Start command: `celery -A citationpulse.celery_app worker -Q default -l info --pool=solo`
 - No HTTP healthcheck needed
 
 ### 3) Web service
 
 - Builder: `DOCKERFILE`
-- Dockerfile: `infra/docker/web.Dockerfile`
+- Root directory: `apps/web`
+- Dockerfile: `Dockerfile`
 - Start command: `npm run start -- --port $PORT`
 - Healthcheck path: `/`
 
@@ -81,3 +91,4 @@ Use the same production `DATABASE_URL` when running this command.
 - Celery is Postgres-backed in this project (no Redis required).
 - Web build-time public env vars (`NEXT_PUBLIC_*`) are wired through the Docker build.
 - The web container is configured to bind Railway's dynamic `PORT`.
+- If Railway says `using build driver railpack`, Docker mode is not selected yet; switch builder to `DOCKERFILE`.

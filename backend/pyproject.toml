@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "citationpulse-api"
+version = "0.1.0"
+description = "CitationPulse GEO — FastAPI control plane + Celery workers"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0,<0.116.0",
+  "uvicorn[standard]>=0.32.0,<0.33.0",
+  "sqlalchemy>=2.0.36,<2.1.0",
+  "psycopg[binary]>=3.2.0,<4.0.0",
+  "alembic>=1.14.0,<1.15.0",
+  "pydantic>=2.10.0,<3.0.0",
+  "pydantic-settings>=2.6.0,<3.0.0",
+  "celery[sqlalchemy]>=5.4.0,<6.0.0",
+  "httpx>=0.28.0,<0.29.0",
+  "tenacity>=9.0.0,<10.0.0",
+  "boto3>=1.35.0,<2.0.0",
+  "PyJWT[crypto]>=2.10.0,<3.0.0",
+  "openai>=1.60.0,<2.0.0",
+  "anthropic>=0.40.0,<1.0.0",
+  "google-genai>=1.0.0,<2.0.0",
+  "playwright>=1.49.0,<2.0.0",
+  "python-multipart>=0.0.9,<0.1.0",
+  "email-validator>=2.2.0,<3.0.0",
+  "typer>=0.15.0,<0.16.0",
+  "tldextract>=5.1.0,<6.0.0",
+  "sentry-sdk[fastapi]>=2.19.0,<3.0.0",
+  "opentelemetry-api>=1.28.0,<2.0.0",
+  "opentelemetry-sdk>=1.28.0,<2.0.0",
+  "opentelemetry-exporter-otlp>=1.28.0,<2.0.0",
+  "opentelemetry-instrumentation-fastapi>=0.49b0,<0.50.0",
+  "python-json-logger>=2.0.7,<3.0.0",
+  "stripe>=11.0.0,<12.0.0",
+]
+
+[project.optional-dependencies]
+embeddings = [
+  "sentence-transformers>=3.0.0,<4.0.0",
+]
+dev = [
+  "pytest>=8.3.0,<9.0.0",
+  "pytest-asyncio>=0.24.0,<0.25.0",
+  "ruff>=0.8.0,<0.9.0",
+  "mypy>=1.13.0,<2.0.0",
+]
+
+[project.scripts]
+citationpulse = "citationpulse.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true

@@ -1,0 +1,83 @@
+Metadata-Version: 2.4
+Name: citationpulse-api
+Version: 0.1.0
+Summary: CitationPulse GEO — FastAPI control plane + Celery workers
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi<0.116.0,>=0.115.0
+Requires-Dist: uvicorn[standard]<0.33.0,>=0.32.0
+Requires-Dist: sqlalchemy<2.1.0,>=2.0.36
+Requires-Dist: psycopg[binary]<4.0.0,>=3.2.0
+Requires-Dist: alembic<1.15.0,>=1.14.0
+Requires-Dist: pydantic<3.0.0,>=2.10.0
+Requires-Dist: pydantic-settings<3.0.0,>=2.6.0
+Requires-Dist: celery[sqlalchemy]<6.0.0,>=5.4.0
+Requires-Dist: httpx<0.29.0,>=0.28.0
+Requires-Dist: tenacity<10.0.0,>=9.0.0
+Requires-Dist: boto3<2.0.0,>=1.35.0
+Requires-Dist: PyJWT[crypto]<3.0.0,>=2.10.0
+Requires-Dist: openai<2.0.0,>=1.60.0
+Requires-Dist: anthropic<1.0.0,>=0.40.0
+Requires-Dist: google-genai<2.0.0,>=1.0.0
+Requires-Dist: playwright<2.0.0,>=1.49.0
+Requires-Dist: python-multipart<0.1.0,>=0.0.9
+Requires-Dist: email-validator<3.0.0,>=2.2.0
+Requires-Dist: typer<0.16.0,>=0.15.0
+Requires-Dist: tldextract<6.0.0,>=5.1.0
+Requires-Dist: sentry-sdk[fastapi]<3.0.0,>=2.19.0
+Requires-Dist: opentelemetry-api<2.0.0,>=1.28.0
+Requires-Dist: opentelemetry-sdk<2.0.0,>=1.28.0
+Requires-Dist: opentelemetry-exporter-otlp<2.0.0,>=1.28.0
+Requires-Dist: opentelemetry-instrumentation-fastapi<0.50.0,>=0.49b0
+Requires-Dist: python-json-logger<3.0.0,>=2.0.7
+Requires-Dist: stripe<12.0.0,>=11.0.0
+Provides-Extra: embeddings
+Requires-Dist: sentence-transformers<4.0.0,>=3.0.0; extra == "embeddings"
+Provides-Extra: dev
+Requires-Dist: pytest<9.0.0,>=8.3.0; extra == "dev"
+Requires-Dist: pytest-asyncio<0.25.0,>=0.24.0; extra == "dev"
+Requires-Dist: ruff<0.9.0,>=0.8.0; extra == "dev"
+Requires-Dist: mypy<2.0.0,>=1.13.0; extra == "dev"
+
+# CitationPulse API (`apps/api`)
+
+Python 3.12+ package: FastAPI control plane, Celery workers, Alembic migrations (run from repo root or `infra/sql`).
+
+## Setup
+
+```bash
+cd apps/api
+uv sync --extra dev
+# or: pip install -e ".[dev]"
+```
+
+Copy root `.env.example` to `.env` and set `DATABASE_URL`, `REDIS_URL`, engine API keys.
+
+## Migrations
+
+From repository root:
+
+```bash
+make migrate
+# or:
+cd infra/sql && alembic upgrade head
+```
+
+## Run API
+
+```bash
+make dev-api
+# or:
+uv run uvicorn citationpulse.main:app --reload --host 0.0.0.0 --port 8000 --app-dir apps/api/src
+```
+
+Set `PYTHONPATH=apps/api/src` or install the package in editable mode.
+
+## Celery
+
+```bash
+celery -A citationpulse.celery_app worker -Q default,browser -l info
+celery -A citationpulse.celery_app beat -l info
+```
+
+Use `PYTHONPATH=apps/api/src` from monorepo root.

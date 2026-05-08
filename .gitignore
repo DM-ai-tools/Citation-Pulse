@@ -18,6 +18,20 @@ __pycache__/
 *.pyc
 *.pyo
 
+# --- frontend/ (Railway deploy copy) ---
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/tsconfig.tsbuildinfo
+
+# --- backend/ (Railway deploy copy) ---
+backend/.venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/*.log
+
 # --- Repo-wide ---
 .env
 *.log

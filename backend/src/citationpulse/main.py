@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from citationpulse.api.v1.billing import router as billing_router
+from citationpulse.api.v1.endpoints import router as v1_router
+from citationpulse.api.v1.scans import router as scans_router
+from citationpulse.api.v1.operator import router as operator_router
+from citationpulse.api.v1.partner import router as partner_router
+from citationpulse.api.webhooks.stripe import router as stripe_router
+from citationpulse.core.config import get_settings
+from citationpulse.core.observability import setup_observability
+
+setup_observability()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _ = app
+    yield
+
+
+settings = get_settings()
+origins = [o.strip() for o in settings.api_cors_origins.split(",") if o.strip()]
+
+app = FastAPI(title="CitationPulse API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return resp
+
+
+@app.get("/")
+def root():
+    """Friendly index — visiting :8000/ in the browser used to show 404."""
+    return {
+        "name": "CitationPulse GEO API",
+        "version": "0.1.0",
+        "status": "ok",
+        "endpoints": {
+            "health": "/health",
+            "metrics": "/metrics",
+            "docs": "/docs",
+            "openapi": "/openapi.json",
+            "create_scan": "POST /api/v1/scans",
+            "scan_snapshot": "GET /api/v1/scans/{scan_id}",
+            "scan_report": "GET /api/v1/scans/{scan_id}/report",
+            "scan_stream": "GET /api/v1/scans/{scan_id}/stream (SSE)",
+            "public_share": "GET /api/v1/scans/public/{token}",
+        },
+        "web_app": "http://localhost:3000",
+    }
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics_stub():
+    """Expose Prometheus metrics here (e.g. prometheus_client) in production."""
+    return {"runs_per_minute": 0, "citations_captured": 0, "engine_error_rate": 0.0}
+
+
+app.include_router(v1_router, prefix="/api/v1")
+app.include_router(scans_router, prefix="/api/v1")
+app.include_router(billing_router, prefix="/api/v1")
+app.include_router(partner_router, prefix="/api/v1")
+app.include_router(operator_router, prefix="/api/v1/operator")
+app.include_router(stripe_router, prefix="/webhooks")
+
+try:
+    FastAPIInstrumentor.instrument_app(app)
+except Exception:
+    pass
