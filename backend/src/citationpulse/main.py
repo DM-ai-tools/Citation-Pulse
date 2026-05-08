@@ -25,12 +25,21 @@ async def lifespan(app: FastAPI):
 
 
 settings = get_settings()
-origins = [o.strip() for o in settings.api_cors_origins.split(",") if o.strip()]
+
+
+def _normalise_origin(origin: str) -> str:
+    return origin.strip().rstrip("/")
+
+
+origins = [_normalise_origin(o) for o in settings.api_cors_origins.split(",") if o.strip()]
+railway_origin_regex = r"^https:\/\/([a-z0-9-]+\.)*up\.railway\.app$"
+local_origin_regex = r"^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$"
 
 app = FastAPI(title="CitationPulse API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins or ["*"],
+    allow_origin_regex=f"{railway_origin_regex}|{local_origin_regex}",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
