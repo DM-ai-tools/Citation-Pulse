@@ -1,4 +1,4 @@
-import { apiFetch } from "./apiClient";
+import { apiBaseUrl, apiFetch } from "./apiClient";
 import type { ReportData } from "@/types/report";
 import type { ScanSnapshot } from "@/types/scan";
 
@@ -42,6 +42,5 @@ export async function shareScan(scanId: string, share_public = true) {
 }
 
 export function scanStreamUrl(scanId: string) {
-  const b = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  return `${b}/api/v1/scans/${scanId}/stream`;
+  return `${apiBaseUrl()}/api/v1/scans/${scanId}/stream`;
 }
