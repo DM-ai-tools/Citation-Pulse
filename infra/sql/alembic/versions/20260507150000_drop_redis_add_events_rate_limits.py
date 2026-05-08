@@ -19,33 +19,49 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    op.create_table(
-        "scan_events",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True, nullable=False),
-        sa.Column("scan_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("payload", postgresql.JSONB(), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.ForeignKeyConstraint(["scan_id"], ["scans.id"], ondelete="CASCADE"),
-    )
-    op.create_index("ix_scan_events_scan_id", "scan_events", ["scan_id"])
-    op.create_index("ix_scan_events_created_at", "scan_events", ["created_at"])
-    op.create_index(
-        "ix_scan_events_scan_id_id", "scan_events", ["scan_id", "id"]
-    )
+def _table_exists(table_name: str) -> bool:
+    insp = sa.inspect(op.get_bind())
+    return table_name in insp.get_table_names()
 
-    op.create_table(
-        "rate_limits",
-        sa.Column("key", sa.String(length=256), primary_key=True, nullable=False),
-        sa.Column("count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-    )
-    op.create_index("ix_rate_limits_expires_at", "rate_limits", ["expires_at"])
+
+def _index_exists(table_name: str, index_name: str) -> bool:
+    insp = sa.inspect(op.get_bind())
+    return any(idx["name"] == index_name for idx in insp.get_indexes(table_name))
+
+
+def upgrade() -> None:
+    if not _table_exists("scan_events"):
+        op.create_table(
+            "scan_events",
+            sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True, nullable=False),
+            sa.Column("scan_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("payload", postgresql.JSONB(), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("now()"),
+            ),
+            sa.ForeignKeyConstraint(["scan_id"], ["scans.id"], ondelete="CASCADE"),
+        )
+    if not _index_exists("scan_events", "ix_scan_events_scan_id"):
+        op.create_index("ix_scan_events_scan_id", "scan_events", ["scan_id"])
+    if not _index_exists("scan_events", "ix_scan_events_created_at"):
+        op.create_index("ix_scan_events_created_at", "scan_events", ["created_at"])
+    if not _index_exists("scan_events", "ix_scan_events_scan_id_id"):
+        op.create_index(
+            "ix_scan_events_scan_id_id", "scan_events", ["scan_id", "id"]
+        )
+
+    if not _table_exists("rate_limits"):
+        op.create_table(
+            "rate_limits",
+            sa.Column("key", sa.String(length=256), primary_key=True, nullable=False),
+            sa.Column("count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        )
+    if not _index_exists("rate_limits", "ix_rate_limits_expires_at"):
+        op.create_index("ix_rate_limits_expires_at", "rate_limits", ["expires_at"])
 
 
 def downgrade() -> None:
