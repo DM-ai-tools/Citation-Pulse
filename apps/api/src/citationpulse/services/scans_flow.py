@@ -130,19 +130,24 @@ def compute_scan_score(db: Session, scan_id: UUID) -> int:
 
 def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
     scan = db.get(Scan, scan_id)
-    if not scan or scan.status == "completed":
+    if not scan:
         return
     terminal, total = count_terminal_runs_for_scan(db, scan_id)
     if total == 0 or terminal < total:
         return
+    new_score = compute_scan_score(db, scan_id)
+    was_new = scan.status != "completed"
+    prev_score = scan.score_overall
     scan.status = "completed"
-    scan.completed_at = datetime.now(timezone.utc)
-    scan.score_overall = compute_scan_score(db, scan_id)
+    if scan.completed_at is None:
+        scan.completed_at = datetime.now(timezone.utc)
+    scan.score_overall = new_score
     db.commit()
-    publish_scan_event(
-        str(scan.id),
-        {"type": "scan.completed", "score": scan.score_overall or 0},
-    )
+    if was_new or prev_score != new_score:
+        publish_scan_event(
+            str(scan.id),
+            {"type": "scan.completed", "score": scan.score_overall or 0},
+        )
 
 
 def _cell_citations_payload(cites: list[Citation], limit: int = 8) -> list[dict[str, object]]:
