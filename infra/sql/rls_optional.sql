@@ -1,0 +1,6 @@
+-- Optional production hardening: enable RLS after the API sets
+-- `SET LOCAL app.tenant_id = '<uuid>'` on every pooled connection (Phase 2+).
+-- Example policy (adjust per table):
+-- ALTER TABLE brands ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY brands_tenant ON brands
+--   USING (tenant_id = current_setting('app.tenant_id')::uuid);

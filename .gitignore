@@ -1,0 +1,26 @@
+# --- Frontend (apps/web) ---
+node_modules/
+apps/web/node_modules/
+apps/web/.next/
+apps/web/.env.local
+apps/web/tsconfig.tsbuildinfo
+.vite/
+dist/
+build/
+coverage/
+
+# --- Backend (apps/api) ---
+apps/api/.venv/
+apps/api/.pytest_cache/
+apps/api/.mypy_cache/
+apps/api/.ruff_cache/
+__pycache__/
+*.pyc
+*.pyo
+
+# --- Repo-wide ---
+.env
+*.log
+.DS_Store
+.idea/
+.vscode/
