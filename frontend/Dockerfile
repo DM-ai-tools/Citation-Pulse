@@ -2,7 +2,8 @@ FROM node:22-alpine AS deps
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+# Copy package files from repo root → frontend/ subfolder
+COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci || npm install
 
 FROM node:22-alpine AS build
@@ -22,7 +23,8 @@ ENV NEXT_PUBLIC_DASHBOARD_BRAND_ID=${NEXT_PUBLIC_DASHBOARD_BRAND_ID}
 ENV NEXT_PUBLIC_DASHBOARD_SITE_URL=${NEXT_PUBLIC_DASHBOARD_SITE_URL}
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+# Copy entire frontend folder as build context
+COPY frontend/ .
 
 RUN npm run build
 

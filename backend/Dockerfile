@@ -4,8 +4,9 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-COPY pyproject.toml README.md ./
-COPY src ./src
+# Copy from repo root → backend/ subfolder
+COPY backend/pyproject.toml backend/README.md ./
+COPY backend/src ./src
 
 RUN pip install --no-cache-dir -e .
 
