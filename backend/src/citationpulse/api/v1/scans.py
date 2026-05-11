@@ -14,6 +14,7 @@ from citationpulse.core.config import get_settings
 from citationpulse.db.session import SessionLocal
 from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent
 from citationpulse.schemas.scans import ScanCreate, ScanCreateResponse, ShareBody
+from citationpulse.services.client_ip import effective_client_ip
 from citationpulse.services.rate_limit import allow_anonymous_scan
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.scans_flow import (
@@ -37,12 +38,6 @@ SSE_HEADERS = {
 }
 
 
-def _client_ip(request: Request) -> str:
-    return (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (
-        request.client.host if request.client else ""
-    )
-
-
 @router.post("", response_model=ScanCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_scan(
     request: Request,
@@ -50,8 +45,11 @@ def create_scan(
     background_tasks: BackgroundTasks,
     body: ScanCreate,
 ) -> ScanCreateResponse:
-    ip = _client_ip(request)
-    if not allow_anonymous_scan(ip):
+    settings = get_settings()
+    ip = effective_client_ip(request)
+    if not allow_anonymous_scan(
+        ip, limit_per_hour=settings.anonymous_scan_rate_limit_per_hour
+    ):
         raise HTTPException(status_code=429, detail="Too many scans from this IP — try again later")
 
     url = canonicalize_url(str(body.url))

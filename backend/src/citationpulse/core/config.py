@@ -137,6 +137,11 @@ class Settings(BaseSettings):
     # Gap / scoring
     gap_absence_run_threshold: int = 3
 
+    # Anonymous POST /api/v1/scans — per resolved client IP per hour. Railway needs
+    # correct X-Forwarded-For handling (see Dockerfile / FORWARDED_ALLOW_IPS). Set
+    # ANONYMOUS_SCAN_RATE_LIMIT_PER_HOUR=0 to disable (not recommended on public URLs).
+    anonymous_scan_rate_limit_per_hour: int = 24
+
     # Public API (Phase 3) — optional HMAC
     public_api_hmac_secret: str = ""
 

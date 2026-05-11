@@ -45,6 +45,8 @@ def _check_and_incr(key: str, limit: int, window_seconds: int) -> bool:
 
 def allow_anonymous_scan(client_ip: str, limit_per_hour: int = 8) -> bool:
     """Token bucket per IP for POST /scans (hour window)."""
+    if limit_per_hour <= 0:
+        return True
     ip = client_ip or "unknown"
     bucket = int(time.time() // 3600)
     return _check_and_incr(f"rl:anon_scan:{ip}:{bucket}", limit_per_hour, 3600)
