@@ -24,7 +24,13 @@ ENV NEXT_PUBLIC_DASHBOARD_SITE_URL=${NEXT_PUBLIC_DASHBOARD_SITE_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN npm run build
+# Next.js inlines NEXT_PUBLIC_* at `next build`. If this is empty here, the browser bundle will
+# still use the code fallback (localhost) even when Railway shows the variable at runtime.
+RUN if [ -z "${NEXT_PUBLIC_API_URL:-}" ]; then \
+      echo "CitationPulse WARNING: NEXT_PUBLIC_API_URL is empty during docker build — client may call localhost. On Railway: set the variable on the Web service, then redeploy with rebuild (clear build cache if the warning persists)."; \
+    else \
+      echo "CitationPulse: NEXT_PUBLIC_API_URL is set for next build (length OK)."; \
+    fi && npm run build
 
 FROM node:22-alpine
 
