@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from citationpulse.core.config import get_settings
@@ -14,6 +15,10 @@ _engine = create_engine(
     echo=False,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+
+def get_engine() -> Engine:
+    return _engine
 
 
 def get_db() -> Generator[Session, None, None]:

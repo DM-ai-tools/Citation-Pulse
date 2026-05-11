@@ -4,6 +4,7 @@ import os
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
 
 from citationpulse.core.config import (
     effective_celery_broker_url,
@@ -67,3 +68,11 @@ celery_app.conf.update(
 )
 
 import citationpulse.tasks.geo  # noqa: E402, F401 — register tasks
+
+
+@worker_process_init.connect
+def _bootstrap_db_schema(**_kwargs: object) -> None:
+    from citationpulse.db.runtime_bootstrap import ensure_opportunities_schema
+    from citationpulse.db.session import get_engine
+
+    ensure_opportunities_schema(get_engine())
