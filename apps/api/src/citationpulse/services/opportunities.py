@@ -23,6 +23,7 @@ from citationpulse.models.domain import (
     Prompt,
     PromptMetrics,
     RunStatus,
+    Scan,
     default_engines,
 )
 
@@ -307,6 +308,22 @@ def upsert_opportunity_row(
         )
 
 
+def engines_for_brand_opportunities(db: Session, brand_id: UUID) -> list[str]:
+    """Engines from the brand's newest scan — matches rows actually enqueued for that funnel.
+
+    Using ``default_engines()`` alone can mis-size the classifier vs a scan that ran a subset
+    of engines (or a different order), which yields no gap match in production while dev looks fine.
+    """
+    scan = db.scalar(
+        select(Scan).where(Scan.brand_id == brand_id).order_by(Scan.created_at.desc()).limit(1)
+    )
+    if scan and scan.engines:
+        out = [str(e).strip() for e in scan.engines if str(e).strip()]
+        if out:
+            return out
+    return list(default_engines())
+
+
 def resolve_stale_for_prompt(
     db: Session,
     brand_id: UUID,
@@ -334,12 +351,22 @@ def resolve_stale_for_prompt(
         row.status = "resolved"
 
 
-def detect_opportunities_for_brand(db: Session, brand_id: UUID) -> int:
+def detect_opportunities_for_brand(
+    db: Session,
+    brand_id: UUID,
+    *,
+    engines_override: list[str] | None = None,
+) -> int:
     """Recompute opportunities for one brand. Returns number of prompts evaluated."""
     brand = db.get(Brand, brand_id)
     if not brand:
         return 0
-    engines = default_engines()
+    if engines_override is not None:
+        engines = [str(e).strip() for e in engines_override if str(e).strip()]
+        if not engines:
+            engines = engines_for_brand_opportunities(db, brand_id)
+    else:
+        engines = engines_for_brand_opportunities(db, brand_id)
     prompts = list(
         db.scalars(select(Prompt).where(Prompt.brand_id == brand_id, Prompt.enabled.is_(True))).all()
     )

@@ -171,16 +171,35 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
         )
     # Funnel report reads `opportunities` from the DB — populate as soon as the scan finishes
     # (same classifier as nightly `detect_opportunities`; Celery beat still refreshes later).
-    if was_new and scan.brand_id:
+    brand_id_for_detect = scan.brand_id
+    engines_ov = list(scan.engines) if scan.engines else None
+    if was_new and brand_id_for_detect:
         try:
             from citationpulse.services.opportunities import detect_opportunities_for_brand
 
-            detect_opportunities_for_brand(db, scan.brand_id)
+            detect_opportunities_for_brand(db, brand_id_for_detect, engines_override=engines_ov)
         except Exception:
             _log.exception(
                 "detect_opportunities_for_brand after scan completion failed scan_id=%s brand_id=%s",
                 scan_id,
-                scan.brand_id,
+                brand_id_for_detect,
+            )
+    elif brand_id_for_detect and scan.status == "completed" and not was_new:
+        # First completion hook can fail (transient DB) or run before late normalisation. Later
+        # `maybe_complete_scan` calls skip `was_new`; backfill when we still have zero open rows.
+        try:
+            from citationpulse.services.opportunities import (
+                detect_opportunities_for_brand,
+                list_opportunities_for_brand,
+            )
+
+            if not list_opportunities_for_brand(db, brand_id_for_detect, status="open"):
+                detect_opportunities_for_brand(db, brand_id_for_detect, engines_override=engines_ov)
+        except Exception:
+            _log.exception(
+                "detect_opportunities_for_brand backfill failed scan_id=%s brand_id=%s",
+                scan_id,
+                brand_id_for_detect,
             )
 
 
@@ -410,7 +429,8 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
         rows = list_opportunities_for_brand(db, brand.id, status="open")
         if not rows and scan.status == "completed":
             try:
-                detect_opportunities_for_brand(db, brand.id)
+                eng_ov = list(scan.engines) if scan.engines else None
+                detect_opportunities_for_brand(db, brand.id, engines_override=eng_ov)
                 rows = list_opportunities_for_brand(db, brand.id, status="open")
             except Exception:
                 _log.exception(
