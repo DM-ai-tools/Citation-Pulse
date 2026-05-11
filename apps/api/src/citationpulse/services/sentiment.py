@@ -17,6 +17,7 @@ from citationpulse.services.llm_router import (
     LLMConfigError,
     LLMProviderError,
     chat_completion_sync,
+    openrouter_configured,
 )
 
 _log = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def sentiment_for_snippet_cached(snippet_hash: str, snippet: str) -> str | None:
       * the upstream call fails (we never crash callers over a sentiment label).
     """
     settings = get_settings()
-    if not snippet or not settings.openrouter_api_key:
+    if not snippet or not openrouter_configured(settings):
         return None
     # Legacy override so old `.env`s with ANTHROPIC_SENTIMENT_MODEL still work.
     model = settings.anthropic_sentiment_model or settings.sentiment_model

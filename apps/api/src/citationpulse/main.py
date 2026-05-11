@@ -14,6 +14,7 @@ from citationpulse.api.v1.operator import router as operator_router
 from citationpulse.api.v1.partner import router as partner_router
 from citationpulse.api.webhooks.stripe import router as stripe_router
 from citationpulse.core.config import get_settings
+from citationpulse.services.llm_router import openrouter_configured
 from citationpulse.core.observability import setup_observability
 
 setup_observability()
@@ -25,7 +26,7 @@ _log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     _ = app
     s = get_settings()
-    if s.environment.lower() == "production" and not s.openrouter_api_key:
+    if s.environment.lower() == "production" and not openrouter_configured(s):
         _log.warning(
             "OPENROUTER_API_KEY is empty on this service — scans will fail OpenRouter auth until set."
         )
@@ -78,10 +79,9 @@ def root():
 
 @app.get("/health")
 def health():
-    s = get_settings()
     return {
         "status": "ok",
-        "openrouter_configured": bool(s.openrouter_api_key),
+        "openrouter_configured": openrouter_configured(),
     }
 
 

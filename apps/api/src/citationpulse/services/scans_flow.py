@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from citationpulse.core.config import get_settings
+from citationpulse.services.llm_router import openrouter_configured
 from citationpulse.models.domain import (
     Brand,
     Citation,
@@ -52,7 +53,7 @@ def available_engines(requested: list[str] | None = None) -> list[str]:
     """
     base = list(requested) if requested else default_engines()
     settings = get_settings()
-    has_openrouter = bool(settings.openrouter_api_key)
+    has_openrouter = openrouter_configured(settings)
     kept: list[str] = []
     for e in base:
         if e == EngineType.GOOGLE_AIO.value:

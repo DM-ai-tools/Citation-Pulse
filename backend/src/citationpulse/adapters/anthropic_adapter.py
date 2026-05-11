@@ -13,7 +13,7 @@ from typing import Any
 from citationpulse.adapters.base import BaseEngineAdapter, EngineResponse, RawCitation
 from citationpulse.core.config import get_settings
 from citationpulse.models.domain import EngineType
-from citationpulse.services.llm_router import LLMConfigError, get_router
+from citationpulse.services.llm_router import LLMConfigError, get_router, openrouter_configured
 from citationpulse.storage.r2 import upload_openrouter_response_raw
 
 
@@ -24,7 +24,7 @@ class AnthropicClaudeAdapter(BaseEngineAdapter):
     async def run(self, prompt: str, locale: str, run_ctx: dict[str, Any]) -> EngineResponse:
         settings = get_settings()
         t0 = time.perf_counter()
-        if not settings.openrouter_api_key:
+        if not openrouter_configured(settings):
             return EngineResponse("", [], "", int((time.perf_counter() - t0) * 1000), None)
 
         model = settings.anthropic_model or settings.claude_model

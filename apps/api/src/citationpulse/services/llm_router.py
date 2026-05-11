@@ -100,25 +100,56 @@ def _settings_or_default(settings: Settings | None) -> Settings:
     return settings or get_settings()
 
 
+def _normalise_openrouter_key(raw: str | None) -> str:
+    """Strip BOM / whitespace / quotes and accidental ``Bearer `` prefix (common .env mistakes)."""
+    if raw is None:
+        return ""
+    s = str(raw).strip().lstrip("\ufeff")
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+        s = s[1:-1].strip()
+    low = s[:7].lower()
+    if low == "bearer ":
+        s = s[7:].strip()
+    return s
+
+
+def openrouter_configured(settings: Settings | None = None) -> bool:
+    """True if a non-empty OpenRouter key is present after the same normalisation used for requests."""
+    s = settings or get_settings()
+    return bool(_normalise_openrouter_key(s.openrouter_api_key))
+
+
 def _require_key(settings: Settings) -> str:
-    if not settings.openrouter_api_key:
+    key = _normalise_openrouter_key(settings.openrouter_api_key)
+    if not key:
         raise LLMConfigError(
             "OPENROUTER_API_KEY is not set. Get one at https://openrouter.ai/keys "
             "and add it to your .env."
         )
-    return settings.openrouter_api_key
+    return key
 
 
 def _headers(settings: Settings) -> dict[str, str]:
-    h = {
-        "Authorization": f"Bearer {_require_key(settings)}",
+    """Headers aligned with https://openrouter.ai/docs/api/reference/overview (Authorization + optional attribution)."""
+    key = _require_key(settings)
+    h: dict[str, str] = {
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
-    if settings.openrouter_http_referer:
-        h["HTTP-Referer"] = settings.openrouter_http_referer
-    if settings.openrouter_app_title:
-        h["X-Title"] = settings.openrouter_app_title
+    referer = (settings.openrouter_http_referer or "").strip()
+    if referer:
+        h["HTTP-Referer"] = referer
+    title = (settings.openrouter_app_title or "").strip()
+    if title:
+        h["X-Title"] = title
+        h["X-OpenRouter-Title"] = title
     return h
+
+
+def _openrouter_http_client(timeout: float) -> httpx.AsyncClient:
+    """Outbound client: ``trust_env=False`` avoids HTTP(S)_PROXY env stripping ``Authorization`` on some hosts."""
+    return httpx.AsyncClient(timeout=timeout, trust_env=False)
 
 
 def _enable_web_if_needed(model: str) -> str:
@@ -269,7 +300,7 @@ class LLMRouter:
     settings: Settings = field(default_factory=get_settings)
 
     def is_configured(self) -> bool:
-        return bool(self.settings.openrouter_api_key)
+        return bool(_normalise_openrouter_key(self.settings.openrouter_api_key))
 
     async def chat_completion(
         self,
@@ -286,7 +317,7 @@ class LLMRouter:
         Retries transient 429/5xx with exponential backoff (configurable via
         `Settings.llm_max_retries`). 4xx other than 429 fail fast.
         """
-        s = self.settings
+        s = get_settings()
         model = _enable_web_if_needed(model)
         body: dict[str, Any] = {
             "model": model,
@@ -301,6 +332,7 @@ class LLMRouter:
         url = f"{s.openrouter_base_url.rstrip('/')}/chat/completions"
         timeout = timeout_s or s.llm_request_timeout_s
         t0 = time.perf_counter()
+        headers = _headers(s)
 
         try:
             async for attempt in AsyncRetrying(
@@ -312,8 +344,8 @@ class LLMRouter:
                 ),
             ):
                 with attempt:
-                    async with httpx.AsyncClient(timeout=timeout) as client:
-                        resp = await client.post(url, headers=_headers(s), json=body)
+                    async with _openrouter_http_client(timeout) as client:
+                        resp = await client.post(url, headers=headers, json=body)
                     if resp.status_code == 429 or 500 <= resp.status_code < 600:
                         raise _RetryableHTTPError(resp.status_code, resp.text)
                     if resp.status_code >= 400:
@@ -360,7 +392,7 @@ class LLMRouter:
         but exposed so future UI features (typewriter live answers) work
         without changing this module.
         """
-        s = self.settings
+        s = get_settings()
         model = _enable_web_if_needed(model)
         body: dict[str, Any] = {
             "model": model,
@@ -375,9 +407,10 @@ class LLMRouter:
 
         url = f"{s.openrouter_base_url.rstrip('/')}/chat/completions"
         timeout = timeout_s or s.llm_request_timeout_s
+        headers = _headers(s)
 
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            async with client.stream("POST", url, headers=_headers(s), json=body) as resp:
+        async with _openrouter_http_client(timeout) as client:
+            async with client.stream("POST", url, headers=headers, json=body) as resp:
                 if resp.status_code >= 400:
                     text = await resp.aread()
                     raise LLMProviderError(resp.status_code, text.decode("utf-8", errors="ignore"))

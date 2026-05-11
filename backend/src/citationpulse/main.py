@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,13 +15,21 @@ from citationpulse.api.v1.partner import router as partner_router
 from citationpulse.api.webhooks.stripe import router as stripe_router
 from citationpulse.core.config import get_settings
 from citationpulse.core.observability import setup_observability
+from citationpulse.services.llm_router import openrouter_configured
 
 setup_observability()
+
+_log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _ = app
+    s = get_settings()
+    if s.environment.lower() == "production" and not openrouter_configured(s):
+        _log.warning(
+            "OPENROUTER_API_KEY is empty on this service — scans will fail OpenRouter auth until set."
+        )
     yield
 
 
@@ -79,7 +88,10 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "openrouter_configured": openrouter_configured(),
+    }
 
 
 @app.get("/metrics")
