@@ -49,6 +49,15 @@ export default function LiveScanPage() {
     }
   }, [q.data?.status, matrixReady, router, scanId]);
 
+  /* If SSE never updates the matrix but the scan is already completed, do not block the funnel forever. */
+  useEffect(() => {
+    if (q.data?.status !== "completed" || matrixReady) return;
+    const id = window.setTimeout(() => {
+      router.replace(`/report/${scanId}`);
+    }, 45_000);
+    return () => window.clearTimeout(id);
+  }, [q.data?.status, matrixReady, router, scanId]);
+
   if (q.isLoading) {
     return (
       <div className="min-h-screen bg-[#F4FCF7]">

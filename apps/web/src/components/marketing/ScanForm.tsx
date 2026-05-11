@@ -50,6 +50,7 @@ export function ScanForm({ className }: { className?: string }) {
   const [promptInput, setPromptInput] = useState("");
   const [locale, setLocale] = useState("en-AU");
   const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   /** Split on commas: completed segments become tags; text after the last comma stays in the input. */
   function onPromptChange(raw: string) {
@@ -154,6 +155,7 @@ export function ScanForm({ className }: { className?: string }) {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    setSubmitError(null);
     setLoading(true);
     try {
       let compList = [...competitorTags];
@@ -207,7 +209,11 @@ export function ScanForm({ className }: { className?: string }) {
       toast.success("Scan started");
       router.push(`/scan/${res.scan_id}`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Something went wrong";
+      let msg = "Something went wrong";
+      if (err instanceof Error) {
+        msg = err.name === "TimeoutError" ? "Request timed out — check the API is reachable." : err.message;
+      }
+      setSubmitError(msg);
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -347,10 +353,20 @@ export function ScanForm({ className }: { className?: string }) {
           >
             {loading ? "Starting…" : "▶ Start free citation scan"}
           </button>
-          <p className="mt-3 text-center text-[11.5px] text-tr-mute">
-            No credit card. Live results in <strong className="font-bold text-tr-teal">~60 seconds</strong>. We&apos;ll
-            email a permanent link.
-          </p>
+          {submitError ? (
+            <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-center text-[13px] text-red-800">
+              {submitError}
+              <span className="mt-1 block text-[11.5px] text-red-700/90">
+                Tip: set <code className="rounded bg-red-100 px-1">NEXT_PUBLIC_API_URL</code> to your API (same
+                browser-reachable URL) and ensure CORS allows this site.
+              </span>
+            </p>
+          ) : (
+            <p className="mt-3 text-center text-[11.5px] text-tr-mute">
+              No credit card. Live results in <strong className="font-bold text-tr-teal">~60 seconds</strong>.
+              We&apos;ll email a permanent link.
+            </p>
+          )}
         </div>
       </form>
     </div>

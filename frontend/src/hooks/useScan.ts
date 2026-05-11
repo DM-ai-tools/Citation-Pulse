@@ -12,6 +12,11 @@ export function useScan(scanId: string) {
     queryKey: ["scan", scanId],
     queryFn: () => getScan(scanId),
     enabled: !!scanId,
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      if (!d || d.status === "completed") return false;
+      return 2500;
+    },
   });
 
   const done = q.data?.status === "completed";

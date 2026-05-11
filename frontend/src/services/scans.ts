@@ -2,6 +2,8 @@ import { apiBaseUrl, apiFetch } from "./apiClient";
 import type { ReportData } from "@/types/report";
 import type { ScanSnapshot } from "@/types/scan";
 
+const scanPostTimeoutMs = 90_000;
+
 export async function createScan(body: {
   url: string;
   competitors?: string[];
@@ -12,6 +14,7 @@ export async function createScan(body: {
   const r = await apiFetch("/api/v1/scans", {
     method: "POST",
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(scanPostTimeoutMs),
   });
   if (!r.ok) {
     const t = await r.text();

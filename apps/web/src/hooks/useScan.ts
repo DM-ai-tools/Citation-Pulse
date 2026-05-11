@@ -12,6 +12,12 @@ export function useScan(scanId: string) {
     queryKey: ["scan", scanId],
     queryFn: () => getScan(scanId),
     enabled: !!scanId,
+    // Fallback when EventSource is blocked (CORS / mixed content / corporate proxy).
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      if (!d || d.status === "completed") return false;
+      return 2500;
+    },
   });
 
   const done = q.data?.status === "completed";
