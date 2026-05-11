@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { rememberDashboardScan } from "@/lib/dashboardScanPreference";
 import { LiveCitationMatrix } from "@/components/scan/LiveCitationMatrix";
@@ -8,6 +8,7 @@ import { ScanLiveHeader } from "@/components/scan/ScanLiveHeader";
 import { ScanProgressColumn } from "@/components/scan/ScanProgressColumn";
 import { ErrorState, Skeleton } from "@/components/primitives";
 import { useScan } from "@/hooks/useScan";
+import { matrixAllEnginesTerminal } from "@/lib/matrixStats";
 
 export default function LiveScanPage() {
   const params = useParams<{ scanId: string }>();
@@ -15,15 +16,38 @@ export default function LiveScanPage() {
   const scanId = params.scanId;
   const q = useScan(scanId);
 
+  const matrixReady = useMemo(() => {
+    const d = q.data;
+    if (!d) return false;
+    return matrixAllEnginesTerminal(d.prompts, d.engines, d.matrix.cells);
+  }, [q.data]);
+
+  const prevCompletedRef = useRef(false);
+
+  useEffect(() => {
+    prevCompletedRef.current = false;
+  }, [scanId]);
+
   useEffect(() => {
     if (scanId) rememberDashboardScan(scanId);
   }, [scanId]);
 
+  /* After the API marks the scan completed, pull a fresh snapshot once so the matrix
+     matches the server if SSE events arrived out of order. */
   useEffect(() => {
-    if (q.data?.status === "completed") {
+    const completed = q.data?.status === "completed";
+    if (completed && !prevCompletedRef.current) {
+      prevCompletedRef.current = true;
+      void q.refetch();
+    }
+    if (!completed) prevCompletedRef.current = false;
+  }, [q.data?.status, q]);
+
+  useEffect(() => {
+    if (q.data?.status === "completed" && matrixReady) {
       router.replace(`/report/${scanId}`);
     }
-  }, [q.data?.status, router, scanId]);
+  }, [q.data?.status, matrixReady, router, scanId]);
 
   if (q.isLoading) {
     return (

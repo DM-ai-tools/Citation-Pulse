@@ -85,12 +85,10 @@ def _engine_value(engine: EngineType | str) -> str:
 
 
 def _run_fully_processed(db: Session, run: EngineRun) -> bool:
-    """A run is 'terminal' once the engine call has finished (ok or error).
+    """A run is terminal once the engine call has finished (ok or error).
 
-    `normalise_task` refines citation ownership/sentiment afterwards, but it must NOT
-    block scan completion: a legitimate scan can have all-neutral citations
-    (when neither the brand nor competitors appear), and waiting for at least one
-    non-neutral citation would leave such scans stuck in `running` forever.
+    Citation ownership/embeddings are applied inline in ``run_engine_task`` before
+    the scan can complete, so completed scans already reflect brand/competitor cells.
     """
     return run.status in (RunStatus.OK.value, RunStatus.ERROR.value)
 
@@ -101,6 +99,20 @@ def count_terminal_runs_for_scan(db: Session, scan_id: UUID) -> tuple[int, int]:
     total = len(runs)
     terminal = sum(1 for r in runs if _run_fully_processed(db, r))
     return terminal, total
+
+
+def expected_engine_runs_for_scan(db: Session, scan: Scan) -> int:
+    """Rows we expect after fan-out: enabled prompts × scan engines."""
+    n_prompts = (
+        db.scalar(
+            select(func.count())
+            .select_from(Prompt)
+            .where(Prompt.brand_id == scan.brand_id, Prompt.enabled.is_(True))
+        )
+        or 0
+    )
+    eng_list = list(scan.engines) if scan.engines else default_engines()
+    return n_prompts * len(eng_list)
 
 
 def compute_scan_score(db: Session, scan_id: UUID) -> int:
@@ -132,7 +144,10 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
     scan = db.get(Scan, scan_id)
     if not scan:
         return
+    expected = expected_engine_runs_for_scan(db, scan)
     terminal, total = count_terminal_runs_for_scan(db, scan_id)
+    if expected > 0 and total < expected:
+        return
     if total == 0 or terminal < total:
         return
     new_score = compute_scan_score(db, scan_id)

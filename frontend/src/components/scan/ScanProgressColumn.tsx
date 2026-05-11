@@ -10,8 +10,10 @@ export function ScanProgressColumn({ data, scanId }: { data: ScanSnapshot; scanI
   const nE = data.engines.length;
   const total = nP * nE;
   let done = 0;
-  for (const pe of Object.values(data.progress.per_engine)) {
-    done += pe.done;
+  for (const eng of data.engines) {
+    const pe = data.progress.per_engine[eng];
+    const t = pe && pe.total > 0 ? pe.total : nP;
+    done += Math.min(pe?.done ?? 0, t);
   }
   const overallDone = Math.min(done, total);
   const pct = total ? Math.round((100 * overallDone) / total) : 0;
@@ -75,8 +77,10 @@ export function ScanProgressColumn({ data, scanId }: { data: ScanSnapshot; scanI
         </p>
         <div className="flex flex-col gap-2.5">
           {data.engines.map((eng) => {
-            const pe = data.progress.per_engine[eng] || { done: 0, total: nP };
-            return <EngineProgressRow key={eng} engine={eng} done={pe.done} total={pe.total} />;
+            const pe = data.progress.per_engine[eng];
+            const rowTotal = pe && pe.total > 0 ? pe.total : nP;
+            const rowDone = Math.min(pe?.done ?? 0, rowTotal);
+            return <EngineProgressRow key={eng} engine={eng} done={rowDone} total={rowTotal} />;
           })}
         </div>
       </div>

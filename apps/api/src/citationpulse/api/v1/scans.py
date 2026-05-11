@@ -4,13 +4,12 @@ import asyncio
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from citationpulse.api.deps import DbSession
-from citationpulse.celery_app import celery_app
 from citationpulse.core.config import get_settings
 from citationpulse.db.session import SessionLocal
 from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent
@@ -23,8 +22,13 @@ from citationpulse.services.scans_flow import (
     build_scan_snapshot,
     get_or_create_anonymous_tenant,
 )
+from citationpulse.tasks.geo import fan_out_scan_task
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+
+
+def _enqueue_fan_out_scan(scan_id: str) -> None:
+    fan_out_scan_task.delay(scan_id)
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -40,7 +44,12 @@ def _client_ip(request: Request) -> str:
 
 
 @router.post("", response_model=ScanCreateResponse, status_code=status.HTTP_201_CREATED)
-def create_scan(request: Request, db: DbSession, body: ScanCreate) -> ScanCreateResponse:
+def create_scan(
+    request: Request,
+    db: DbSession,
+    background_tasks: BackgroundTasks,
+    body: ScanCreate,
+) -> ScanCreateResponse:
     ip = _client_ip(request)
     if not allow_anonymous_scan(ip):
         raise HTTPException(status_code=429, detail="Too many scans from this IP — try again later")
@@ -99,7 +108,9 @@ def create_scan(request: Request, db: DbSession, body: ScanCreate) -> ScanCreate
     db.commit()
     db.refresh(scan)
 
-    celery_app.send_task("citationpulse.fan_out_scan", args=[str(scan.id)])
+    # Defer so the client gets 201 immediately; with task_always_eager (default in dev) the
+    # full fan-out + engine runs still execute in this process after the response is sent.
+    background_tasks.add_task(_enqueue_fan_out_scan, str(scan.id))
     return ScanCreateResponse(scan_id=str(scan.id))
 
 

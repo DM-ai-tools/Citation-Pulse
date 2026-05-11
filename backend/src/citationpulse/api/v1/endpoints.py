@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from citationpulse.api.deps import CurrentTenant, DbSession, get_auth_context
-from citationpulse.celery_app import celery_app
+from citationpulse.tasks.geo import fan_out_brand
 from citationpulse.models.domain import Alert, AlertRule, Brand, Citation, EngineRun, EngineType, Prompt
 from citationpulse.schemas.brands import (
     AlertFeedItem,
@@ -110,7 +110,7 @@ def trigger_runs(
     engines = [e.value for e in EngineType]
     if body and body.engines:
         engines = [e for e in body.engines if e in engines]
-    celery_app.send_task("citationpulse.fan_out_brand", args=[str(b.id), engines])
+    fan_out_brand.delay(str(b.id), engines)
     return {"status": "enqueued", "brand_id": str(b.id), "engines": engines}
 
 

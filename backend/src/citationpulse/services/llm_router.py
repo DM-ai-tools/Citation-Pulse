@@ -125,13 +125,16 @@ def _enable_web_if_needed(model: str) -> str:
     """Ensure non-search-native models pull web results via OpenRouter's plugin.
 
     The `:online` suffix is OpenRouter's shorthand for the web plugin and is
-    safe to apply once. We refuse to double-apply.
+    safe to apply once. Native web providers (Perplexity, GPT search preview)
+    stay unchanged. Without this, env overrides like ``CLAUDE_MODEL=anthropic/…``
+    (no suffix) would run **without** web and often return **zero** extractable
+    citations next to ChatGPT defaults that already include ``:online``.
     """
     if model.endswith(":online"):
         return model
     if any(model.startswith(prefix) for prefix in _NATIVE_WEB_PROVIDERS):
         return model
-    return model
+    return f"{model}:online"
 
 
 # Citation extraction --------------------------------------------------------
@@ -150,6 +153,11 @@ def _extract_citations(payload: dict[str, Any], answer_text: str) -> list[LLMCit
         seen.add(url)
         out.append(LLMCitation(url=url, title=title, snippet=snippet, position=len(out)))
 
+    # 0) Optional plugin / search metadata at response root (varies by provider)
+    for row in payload.get("search_results") or []:
+        if isinstance(row, dict) and row.get("url"):
+            _push(str(row["url"]), row.get("title"), row.get("snippet"))
+
     # 1) Perplexity / OpenRouter root-level `citations: ["url", ...]`
     for c in payload.get("citations") or []:
         if isinstance(c, str):
@@ -163,7 +171,10 @@ def _extract_citations(payload: dict[str, Any], answer_text: str) -> list[LLMCit
         for ann in msg.get("annotations") or []:
             if not isinstance(ann, dict):
                 continue
-            url_cite = ann.get("url_citation") or ann
+            if ann.get("type") == "url_citation" and isinstance(ann.get("url_citation"), dict):
+                url_cite = ann["url_citation"]
+            else:
+                url_cite = ann.get("url_citation") or ann
             _push(
                 url_cite.get("url") or url_cite.get("uri"),
                 url_cite.get("title"),
@@ -183,17 +194,55 @@ def _extract_citations(payload: dict[str, Any], answer_text: str) -> list[LLMCit
     return out
 
 
+def _text_from_content_block(block: dict[str, Any]) -> str:
+    """Normalize one message.content element (OpenAI, Anthropic, Gemini via OpenRouter)."""
+    if block.get("type") == "text":
+        t = block.get("text")
+        return str(t) if isinstance(t, str) else ""
+    t = block.get("text")
+    if isinstance(t, str):
+        return t
+    return ""
+
+
+def _message_auxiliary_text(msg: dict[str, Any]) -> str:
+    """Reasoning / refusal strings some models attach beside `content` (regex URL fallback)."""
+    parts: list[str] = []
+    r = msg.get("reasoning")
+    if isinstance(r, str) and r.strip():
+        parts.append(r.strip())
+    elif isinstance(r, dict):
+        rt = r.get("text") or r.get("content")
+        if isinstance(rt, str) and rt.strip():
+            parts.append(rt.strip())
+    ref = msg.get("refusal")
+    if isinstance(ref, str) and ref.strip():
+        parts.append(ref.strip())
+    return "\n".join(parts)
+
+
 def _extract_text(payload: dict[str, Any]) -> str:
     """Pull the assistant text out of an OpenAI-shape Chat Completion payload."""
-    for choice in payload.get("choices") or []:
-        msg = (choice or {}).get("message") or {}
-        content = msg.get("content")
-        if isinstance(content, str):
-            return content
-        # Anthropic-style structured content blocks
-        if isinstance(content, list):
-            return "".join(b.get("text", "") for b in content if isinstance(b, dict))
-    return ""
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+    choice = choices[0] or {}
+    msg = choice.get("message") or {}
+    content = msg.get("content")
+    main = ""
+    if isinstance(content, str):
+        main = content
+    elif isinstance(content, list):
+        main = "".join(_text_from_content_block(b) for b in content if isinstance(b, dict))
+    if not (main or "").strip():
+        legacy = choice.get("text")
+        if isinstance(legacy, str):
+            main = legacy
+    aux = _message_auxiliary_text(msg)
+    out = (main or "").strip()
+    if aux:
+        out = f"{out}\n{aux}".strip() if out else aux.strip()
+    return out
 
 
 def _cost_from_usage(payload: dict[str, Any]) -> Decimal | None:
@@ -277,6 +326,12 @@ class LLMRouter:
         citations = _extract_citations(payload, text)
         usage = payload.get("usage") or {}
         finish_reason = ((payload.get("choices") or [{}])[0]).get("finish_reason")
+        if not citations and text and len(text) > 120:
+            _log.debug(
+                "openrouter: long answer but zero normalized citations (model=%s finish=%s)",
+                payload.get("model"),
+                finish_reason,
+            )
         return LLMResponse(
             text=text,
             citations=citations,

@@ -17,7 +17,10 @@ export function applyScanEvent(prev: ScanSnapshot | undefined, event: ScanEvent)
   }
   if (event.type === "engine.progress") {
     const per_engine = { ...prev.progress.per_engine };
-    per_engine[event.engine] = { done: event.done, total: event.total };
+    const nP = prev.prompts.length;
+    const total = event.total > 0 ? event.total : nP;
+    const done = Math.min(event.done, total);
+    per_engine[event.engine] = { done, total };
     return { ...prev, progress: { per_engine } };
   }
   if (event.type === "cell.update") {

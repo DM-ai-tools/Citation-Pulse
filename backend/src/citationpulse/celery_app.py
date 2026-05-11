@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -16,6 +18,14 @@ celery_app = Celery(
     broker=effective_celery_broker_url(_settings),
     backend=effective_celery_result_backend(_settings),
 )
+
+_use_worker = os.environ.get("CELERY_USE_WORKER", "").lower() in ("1", "true", "yes")
+_eager_env = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "").strip().lower()
+_dev = _settings.environment.lower() in ("development", "dev", "local")
+_task_always_eager = _eager_env in ("1", "true", "yes") or (
+    _dev and not _use_worker and _eager_env not in ("0", "false", "no")
+)
+
 celery_app.conf.update(
     task_track_started=True,
     task_time_limit=3600,
@@ -23,6 +33,8 @@ celery_app.conf.update(
     task_acks_late=True,
     broker_connection_retry_on_startup=True,
     task_default_queue="default",
+    task_always_eager=_task_always_eager,
+    task_eager_propagates=_task_always_eager,
     task_routes={
         "citationpulse.run_engine": {"queue": "default"},
         "citationpulse.normalise": {"queue": "default"},

@@ -7,7 +7,6 @@ citations across providers.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -15,7 +14,7 @@ from citationpulse.adapters.base import BaseEngineAdapter, EngineResponse, RawCi
 from citationpulse.core.config import get_settings
 from citationpulse.models.domain import EngineType
 from citationpulse.services.llm_router import LLMConfigError, get_router
-from citationpulse.storage.r2 import upload_raw_payload
+from citationpulse.storage.r2 import upload_openrouter_response_raw
 
 
 class AnthropicClaudeAdapter(BaseEngineAdapter):
@@ -38,7 +37,7 @@ class AnthropicClaudeAdapter(BaseEngineAdapter):
             return EngineResponse("", [], "", int((time.perf_counter() - t0) * 1000), None)
 
         key = f"raw/{run_ctx.get('run_id','unknown')}/openrouter_claude.json"
-        upload_raw_payload(key, json.dumps(resp.raw, default=str).encode(), "application/json")
+        upload_openrouter_response_raw(key, resp.raw)
         cites = [
             RawCitation(url=c.url, snippet=c.snippet, position=c.position)
             for c in resp.citations

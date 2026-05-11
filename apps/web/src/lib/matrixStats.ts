@@ -20,6 +20,16 @@ export function promptCompletionPct(
   return Math.round((100 * done) / total);
 }
 
+/** Every prompt × engine cell is terminal (cited / comp / none, including failed runs shown as none). */
+export function matrixAllEnginesTerminal(
+  prompts: { id: string }[],
+  engines: string[],
+  cells: MatrixCell[],
+): boolean {
+  if (!prompts.length || !engines.length) return false;
+  return promptCompletionPct(prompts, engines, cells, null) === 100;
+}
+
 /** Mean of per-engine scores — matches the heatmap layer dial when “All engines” is implied. */
 export function overallCitationScore(
   prompts: { id: string }[],

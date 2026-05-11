@@ -5,7 +5,7 @@ import uuid
 import typer
 from sqlalchemy import select
 
-from citationpulse.celery_app import celery_app
+from citationpulse.tasks.geo import fan_out_brand
 from citationpulse.db.session import SessionLocal
 from citationpulse.models.domain import Brand, PlanType, Prompt, Tenant
 
@@ -58,7 +58,7 @@ def add_prompts(brand_id: str, file: typer.FileText | None = None, text: str | N
 
 @app.command()
 def trigger_run(brand_id: str) -> None:
-    celery_app.send_task("citationpulse.fan_out_brand", args=[brand_id, None])
+    fan_out_brand.delay(brand_id, None)
     typer.echo("enqueued fan_out_brand")
 
 
