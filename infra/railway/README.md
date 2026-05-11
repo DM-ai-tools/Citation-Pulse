@@ -49,6 +49,8 @@ For each service, set a different **Root Directory** and Dockerfile so pip/npm s
 - Start command: `npm run start -- --port $PORT`
 - Healthcheck path: `/`
 
+Railway injects **`PORT` at runtime** (commonly **`8080`**). The web `Dockerfile` runs `next start` with `--port ${PORT:-3000}`, so production binds whatever Railway assigns; **`EXPOSE 3000` in the image is only a default for local runs** and does not force Railway’s edge to use 3000.
+
 ## Required environment variables
 
 Set these in Railway (shared variables are fine):
