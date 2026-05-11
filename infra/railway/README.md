@@ -55,7 +55,7 @@ Set these in Railway (shared variables are fine):
 
 - `DATABASE_URL` -> Railway Postgres URL, with SQLAlchemy driver prefix:
   - `postgresql+psycopg://...`
-- `OPENROUTER_API_KEY` -> required for scans (set on **both** API and worker if you use a separate worker; missing key yields OpenRouter HTTP 401)
+- `OPENROUTER_API_KEY` -> required for scans (set on **both** API and worker if you use a separate worker; missing key yields OpenRouter HTTP 401). After deploy, open `GET /health` on the API: `openrouter_configured` must be `true` (no quotes or stray spaces in the variable value).
 - `ENVIRONMENT=production`
 - `LOG_LEVEL=info`
 

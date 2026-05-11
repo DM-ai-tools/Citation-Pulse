@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,6 +61,17 @@ class Settings(BaseSettings):
     # if app title is set, but are otherwise harmless.
     openrouter_http_referer: str = "https://citationpulse.local"
     openrouter_app_title: str = "CitationPulse GEO"
+
+    @field_validator("openrouter_api_key", mode="before")
+    @classmethod
+    def normalise_openrouter_api_key(cls, v: object) -> str:
+        """Strip whitespace / accidental wrapping quotes so Railway .env typos don't yield HTTP 401."""
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+            s = s[1:-1].strip()
+        return s
 
     # --- Legacy provider keys (kept for back-compat / migration only) ---
     # If `openrouter_api_key` is set, these are IGNORED. They remain here so an
