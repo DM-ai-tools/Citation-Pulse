@@ -24,8 +24,9 @@ import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
 import { apiFetch } from "@/lib/api";
 import { DASHBOARD_LAST_SCAN_STORAGE_KEY } from "@/lib/dashboardScanPreference";
 import { engineTitle } from "@/lib/engineDisplay";
+import { getBrandOpportunities } from "@/services/brands";
 import { getScanReport } from "@/services/scans";
-import type { ReportData } from "@/types/report";
+import type { OpportunityRow, ReportData } from "@/types/report";
 import type { MatrixCell } from "@/types/scan";
 
 type CitationRow = { id: string; url: string; domain: string; ownership: string };
@@ -49,6 +50,9 @@ type MatrixBundle = {
 };
 
 type SoVResponse = { brand_share: number; range_days: number };
+
+/** Optional: set in Docker/Railway build to show deploy revision on the dashboard (e.g. git SHA). */
+const APP_BUILD_LABEL = process.env.NEXT_PUBLIC_APP_VERSION?.trim() ?? "";
 
 /** Deploy-time override; otherwise the latest landing-page scan id from localStorage is used. */
 const SCAN_ID_FROM_ENV = process.env.NEXT_PUBLIC_DASHBOARD_SCAN_ID?.trim() ?? "";
@@ -188,6 +192,15 @@ function EngineMixTooltip({ active, payload, label }: MixTooltipProps) {
         <span className="text-sm font-semibold text-tr-mute"> citations</span>
       </p>
     </div>
+  );
+}
+
+function DeployFootnote() {
+  if (!APP_BUILD_LABEL) return null;
+  return (
+    <p className="mt-6 text-center text-[11px] text-slate-400" data-testid="app-build-label">
+      App build: {APP_BUILD_LABEL}
+    </p>
   );
 }
 
@@ -474,6 +487,7 @@ function BrandDashboard(props: {
   website: WebsiteSummary | null;
   matrix: MatrixBundle;
   sov: SoVResponse | null;
+  opportunities: OpportunityRow[];
 }) {
   const cells = props.matrix.matrix.cells ?? [];
   const engines = props.matrix.engines ?? [];
@@ -483,29 +497,47 @@ function BrandDashboard(props: {
     props.sov != null ? `${Math.round((props.sov.brand_share ?? 0) * 100)}%` : "—";
 
   return (
-    <DashboardShell
-      brandDisplayName={props.brandName}
-      website={props.website}
-      headerMeta={
-        <p className="mt-1 text-xs text-slate-500">
-          No landing scan in this browser yet — showing workspace aggregates for the selected brand. Run a free scan from
-          the home page; your dashboard will pick up that site&apos;s report automatically. Optionally set{" "}
-          <code className="font-mono text-[11px]">NEXT_PUBLIC_DASHBOARD_SITE_URL</code> when multiple brands exist.
-        </p>
-      }
-      sovPct={sovPct}
-      sovFootnote={`Share of brand-owned citations from finished runs in the last ${props.sov?.range_days ?? 30} days.`}
-      citationTotal={totalCitationsInMatrix(cells)}
-      citationLabel="Citations (matrix)"
-      citationFootnote="Total citation rows in the 30-day prompt × engine matrix."
-      prompts={props.matrix.prompts}
-      engines={engines}
-      cells={cells}
-      chartRows={chartRows}
-      mixTitle="Engine mix (matrix)"
-      mixFootnote="Citations captured per engine from the matrix above"
-      tableRows={tableRows}
-    />
+    <Fragment>
+      <DashboardShell
+        brandDisplayName={props.brandName}
+        website={props.website}
+        headerMeta={
+          <div className="space-y-3">
+            <div className="rounded-lg border border-amber-200/90 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
+              <strong className="font-semibold">Workspace view:</strong> SoV and the matrix use this brand&apos;s
+              30‑day runs. <strong className="font-semibold">Top gap opportunities</strong> below load from the same
+              saved detection data as the API (<code className="rounded bg-white/80 px-1 font-mono text-[11px]">
+                GET /brands/…/opportunities
+              </code>
+              ), not from a funnel scan id. Run a free scan from the home page to store a last scan in this browser, or
+              set <code className="font-mono text-[11px]">NEXT_PUBLIC_DASHBOARD_SCAN_ID</code> on the web host to pin
+              the live report view.
+            </div>
+            <p className="text-xs text-slate-500">
+              When multiple brands exist, optionally set{" "}
+              <code className="font-mono text-[11px]">NEXT_PUBLIC_DASHBOARD_SITE_URL</code> to match the site you care
+              about.
+            </p>
+          </div>
+        }
+        sovPct={sovPct}
+        sovFootnote={`Share of brand-owned citations from finished runs in the last ${props.sov?.range_days ?? 30} days.`}
+        citationTotal={totalCitationsInMatrix(cells)}
+        citationLabel="Citations (matrix)"
+        citationFootnote="Total citation rows in the 30-day prompt × engine matrix."
+        prompts={props.matrix.prompts}
+        engines={engines}
+        cells={cells}
+        chartRows={chartRows}
+        mixTitle="Engine mix (matrix)"
+        mixFootnote="Citations captured per engine from the matrix above"
+        tableRows={tableRows}
+      />
+      <div className="mt-8 max-w-6xl">
+        <TopGapOpportunities opportunities={props.opportunities} />
+      </div>
+      <DeployFootnote />
+    </Fragment>
   );
 }
 
@@ -586,6 +618,13 @@ export default function DashboardPage() {
     enabled: scanPrefReady && !useScanReport && !!effectiveBrandId,
   });
 
+  const brandOpportunities = useQuery({
+    queryKey: ["brand-opportunities", effectiveBrandId],
+    queryFn: () => getBrandOpportunities(effectiveBrandId),
+    enabled: scanPrefReady && !useScanReport && !!effectiveBrandId,
+    retry: 1,
+  });
+
   /* ---------- Scan mode (env or latest landing scan) ---------- */
   if (!scanPrefReady) {
     return <SkeletonDashboard />;
@@ -602,7 +641,10 @@ export default function DashboardPage() {
       );
     }
     return (
-      <ScanDashboard data={report.data} linkedFromLanding={!SCAN_ID_FROM_ENV && Boolean(storedScanId)} />
+      <div>
+        <ScanDashboard data={report.data} linkedFromLanding={!SCAN_ID_FROM_ENV && Boolean(storedScanId)} />
+        <DeployFootnote />
+      </div>
     );
   }
 
@@ -647,9 +689,16 @@ export default function DashboardPage() {
 
   const brandName = brandProfile.data?.name ?? "Brand";
   const websiteSummary = websiteFromBrand(brandName, brandProfile.data?.domains ?? []);
+  const opportunityRows: OpportunityRow[] = brandOpportunities.data ?? [];
 
   return (
-    <BrandDashboard brandName={brandName} website={websiteSummary} matrix={matrix.data} sov={sov.data} />
+    <BrandDashboard
+      brandName={brandName}
+      website={websiteSummary}
+      matrix={matrix.data}
+      sov={sov.data}
+      opportunities={opportunityRows}
+    />
   );
 }
 

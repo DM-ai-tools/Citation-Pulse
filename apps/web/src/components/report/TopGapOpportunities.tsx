@@ -35,6 +35,7 @@ export function TopGapOpportunities({
 
   return (
     <section
+      data-testid="top-gap-opportunities"
       className={cn(
         "overflow-hidden rounded-[18px] border border-tr-line bg-white shadow-[0_8px_30px_rgba(10,37,64,0.06)]",
         className,
