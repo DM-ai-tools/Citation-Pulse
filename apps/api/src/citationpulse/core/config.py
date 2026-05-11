@@ -126,6 +126,10 @@ class Settings(BaseSettings):
     # ANONYMOUS_SCAN_RATE_LIMIT_PER_HOUR=0 to disable (not recommended on public URLs).
     anonymous_scan_rate_limit_per_hour: int = 24
 
+    # When the TCP peer is still Railway CGNAT (100.64/10) or we cannot resolve a public
+    # client IP, many users would share one bucket. Use a synthetic key with this higher cap.
+    anonymous_scan_mesh_rate_limit_per_hour: int = 400
+
     # Public API (Phase 3) — optional HMAC
     public_api_hmac_secret: str = ""
 

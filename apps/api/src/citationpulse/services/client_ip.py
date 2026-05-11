@@ -66,6 +66,16 @@ def _first_visible_in_xff(xff: str) -> str | None:
     return None
 
 
+def _last_visible_in_xff(xff: str) -> str | None:
+    """Some proxies append the original client at the end of the chain."""
+    parts = [p.strip() for p in xff.split(",") if p.strip()]
+    for part in reversed(parts):
+        tok = _parse_ip_token(part)
+        if tok and _is_visible_client(tok):
+            return str(tok)
+    return None
+
+
 _forwarded_for_re = re.compile(r"\bfor=\s*([^;,\s]+)", re.IGNORECASE)
 
 
@@ -100,10 +110,9 @@ def effective_client_ip(request: Request) -> str:
             hit = _first_visible_in_xff(xff)
             if hit:
                 return hit
-            first = xff.split(",")[0].strip()
-            tok = _parse_ip_token(first)
-            if tok:
-                return str(tok)
+            hit = _last_visible_in_xff(xff)
+            if hit:
+                return hit
 
         fwd = (hs.get("forwarded") or "").strip()
         if fwd:
@@ -117,3 +126,19 @@ def effective_client_ip(request: Request) -> str:
             return str(tok)
         return peer
     return "unknown"
+
+
+def is_mesh_or_unresolved_client_ip(ip: str) -> bool:
+    """True when we cannot see a real internet client — shared infra (Railway 100.64/10) or missing IP.
+
+    Rate limits keyed only on these addresses collapse many users into one bucket; callers
+    should use a dedicated high cap or a synthetic key (see scans router).
+    """
+    if not ip or ip == "unknown":
+        return True
+    tok = _parse_ip_token(ip)
+    if tok is None:
+        return True
+    if tok.version == 4 and tok in _CGNAT:
+        return True
+    return False

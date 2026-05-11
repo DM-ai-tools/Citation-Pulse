@@ -14,7 +14,7 @@ from citationpulse.core.config import get_settings
 from citationpulse.db.session import SessionLocal
 from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent
 from citationpulse.schemas.scans import ScanCreate, ScanCreateResponse, ShareBody
-from citationpulse.services.client_ip import effective_client_ip
+from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
 from citationpulse.services.rate_limit import allow_anonymous_scan
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.scans_flow import (
@@ -47,9 +47,12 @@ def create_scan(
 ) -> ScanCreateResponse:
     settings = get_settings()
     ip = effective_client_ip(request)
-    if not allow_anonymous_scan(
-        ip, limit_per_hour=settings.anonymous_scan_rate_limit_per_hour
-    ):
+    rl_key = ip
+    rl_limit = settings.anonymous_scan_rate_limit_per_hour
+    if is_mesh_or_unresolved_client_ip(ip):
+        rl_key = "__platform_mesh__"
+        rl_limit = settings.anonymous_scan_mesh_rate_limit_per_hour
+    if not allow_anonymous_scan(rl_key, limit_per_hour=rl_limit):
         raise HTTPException(status_code=429, detail="Too many scans from this IP — try again later")
 
     url = canonicalize_url(str(body.url))

@@ -71,6 +71,8 @@ Set these on Web:
 
 Optional but recommended:
 
+- `ANONYMOUS_SCAN_RATE_LIMIT_PER_HOUR` (default `24`) — per **resolved** public client IP.
+- `ANONYMOUS_SCAN_MESH_RATE_LIMIT_PER_HOUR` (default `400`) — shared cap when the edge still looks like Railway CGNAT (`100.64/10`) or the client IP cannot be resolved; avoids false 429s for all visitors sharing one mesh hop.
 - `SENTRY_DSN`
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
 - `R2_*` variables (if storing raw payloads in R2)
