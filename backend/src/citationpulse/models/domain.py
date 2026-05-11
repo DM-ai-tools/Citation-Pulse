@@ -13,6 +13,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -144,6 +145,7 @@ class Brand(Base):
     tenant: Mapped[Tenant] = relationship(back_populates="brands")
     prompts: Mapped[list[Prompt]] = relationship(back_populates="brand")
     scans: Mapped[list["Scan"]] = relationship(back_populates="brand")
+    opportunities: Mapped[list["Opportunity"]] = relationship(back_populates="brand")
 
 
 class Scan(Base):
@@ -185,9 +187,12 @@ class Prompt(Base):
     intent: Mapped[str | None] = mapped_column(String(128))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    consecutive_gap_runs: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     brand: Mapped[Brand] = relationship(back_populates="prompts")
     engine_runs: Mapped[list[EngineRun]] = relationship(back_populates="prompt")
+    metrics: Mapped["PromptMetrics | None"] = relationship(back_populates="prompt", uselist=False)
+    opportunities: Mapped[list["Opportunity"]] = relationship(back_populates="prompt")
 
 
 class EngineRun(Base):
@@ -317,6 +322,51 @@ class WebhookSubscription(Base):
     events: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class PromptMetrics(Base):
+    """Optional monthly search volume (e.g. DataForSEO) keyed by prompt."""
+
+    __tablename__ = "prompt_metrics"
+
+    prompt_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("prompts.id", ondelete="CASCADE"), primary_key=True
+    )
+    est_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    prompt: Mapped[Prompt] = relationship(back_populates="metrics")
+
+
+class Opportunity(Base):
+    """Graded gap rows for the Top Gap Opportunities dashboard (filled by nightly job)."""
+
+    __tablename__ = "opportunities"
+    __table_args__ = (
+        UniqueConstraint("brand_id", "prompt_id", "gap_type", "scope", name="uq_opportunity_brand_prompt_gap_scope"),
+        CheckConstraint("grade IN ('A','B','C')", name="ck_opportunity_grade"),
+        CheckConstraint("status IN ('open','snoozed','queued','resolved')", name="ck_opportunity_status"),
+        Index("ix_opportunities_brand_status_score", "brand_id", "status", "opportunity_score"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    brand_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("brands.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    prompt_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("prompts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    gap_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))
+    grade: Mapped[str] = mapped_column(String(4), nullable=False)
+    opportunity_score: Mapped[Any] = mapped_column(Numeric(6, 4), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    est_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open", index=True)
+
+    brand: Mapped[Brand] = relationship(back_populates="opportunities")
+    prompt: Mapped[Prompt] = relationship(back_populates="opportunities")
 
 
 class ScanEvent(Base):

@@ -77,7 +77,9 @@ Optional but recommended:
 
 ## Database migrations
 
-Run migrations before first production traffic:
+Run migrations before first production traffic. This repo ships hand-written SQL under `infra/sql/` (for example `20260208_opportunities_prompt_metrics.sql` for Top Gap Opportunities). Apply with `psql "$DATABASE_URL" -f …` or your SQL runner.
+
+If you use Alembic locally:
 
 ```bash
 cd infra/sql

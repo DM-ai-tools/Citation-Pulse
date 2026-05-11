@@ -46,11 +46,16 @@ celery_app.conf.update(
         "citationpulse.fan_out_brand": {"queue": "default"},
         "citationpulse.fan_out_scan": {"queue": "default"},
         "citationpulse.daily_beat": {"queue": "default"},
+        "citationpulse.detect_opportunities": {"queue": "default"},
     },
     beat_schedule={
         "citationpulse-daily": {
             "task": "citationpulse.daily_beat",
             "schedule": crontab(hour=2, minute=0),
+        },
+        "citationpulse-detect-opportunities": {
+            "task": "citationpulse.detect_opportunities",
+            "schedule": crontab(hour=5, minute=0),
         },
         "citationpulse-nightly-alerts": {
             "task": "citationpulse.nightly_alerts",

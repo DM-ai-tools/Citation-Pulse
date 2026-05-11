@@ -5,7 +5,7 @@ import uuid
 import typer
 from sqlalchemy import select
 
-from citationpulse.tasks.geo import fan_out_brand
+from citationpulse.tasks.geo import detect_opportunities_task, fan_out_brand
 from citationpulse.db.session import SessionLocal
 from citationpulse.models.domain import Brand, PlanType, Prompt, Tenant
 
@@ -60,6 +60,16 @@ def add_prompts(brand_id: str, file: typer.FileText | None = None, text: str | N
 def trigger_run(brand_id: str) -> None:
     fan_out_brand.delay(brand_id, None)
     typer.echo("enqueued fan_out_brand")
+
+
+@app.command("detect-opportunities")
+def detect_opportunities_cmd(brand_id: str | None = typer.Option(None, help="Optional brand UUID; omit for all brands")) -> None:
+    """Run Top Gap Opportunities classification (same as nightly Celery task)."""
+    if brand_id:
+        r = detect_opportunities_task.delay(brand_id)
+    else:
+        r = detect_opportunities_task.delay()
+    typer.echo(f"enqueued detect_opportunities task_id={r.id}")
 
 
 if __name__ == "__main__":

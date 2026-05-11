@@ -18,6 +18,7 @@ from citationpulse.schemas.brands import (
     BrandRead,
     CitationRead,
     GapRead,
+    OpportunityRead,
     PromptBulkCreate,
     PromptRead,
     RunCreate,
@@ -30,6 +31,7 @@ from citationpulse.services.brand_dashboard import (
     parse_range_days,
 )
 from citationpulse.services.gaps import detect_gaps
+from citationpulse.services.opportunities import heat_from_grade, list_opportunities_for_brand
 from citationpulse.services.rate_limit import allow_ad_hoc_run
 from citationpulse.services.scorer import trend_citations_per_day
 from citationpulse.services.sov import compute_sov
@@ -214,6 +216,50 @@ def get_gaps(brand_id: UUID, db: DbSession, tenant: CurrentTenant):
         raise HTTPException(status_code=404, detail="Brand not found")
     gaps = detect_gaps(db, tenant.id, b.id)
     return [GapRead(prompt_id=g.prompt_id, score=g.score, reason=g.reason) for g in gaps]
+
+
+_OPPORTUNITY_STATUSES = frozenset({"open", "snoozed", "queued", "resolved"})
+
+
+@router.get("/brands/{brand_id}/opportunities", response_model=list[OpportunityRead])
+def list_brand_opportunities(
+    brand_id: UUID,
+    db: DbSession,
+    tenant: CurrentTenant,
+    status: str = Query("open", description="Filter: open | snoozed | queued | resolved"),
+):
+    b = db.get(Brand, brand_id)
+    if not b or b.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    if status not in _OPPORTUNITY_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status; use one of: {', '.join(sorted(_OPPORTUNITY_STATUSES))}",
+        )
+    rows = list_opportunities_for_brand(db, b.id, status=status)
+    out: list[OpportunityRead] = []
+    for o in rows:
+        pr = db.get(Prompt, o.prompt_id)
+        title = (pr.text if pr else "")[:512] or "(prompt)"
+        scope_val = o.scope if (o.scope or "").strip() else None
+        out.append(
+            OpportunityRead(
+                id=o.id,
+                brand_id=o.brand_id,
+                prompt_id=o.prompt_id,
+                title=title,
+                gap_type=o.gap_type,
+                scope=scope_val,
+                grade=o.grade,
+                heat=heat_from_grade(o.grade),
+                opportunity_score=float(o.opportunity_score),
+                description=o.description,
+                est_volume=o.est_volume,
+                status=o.status,
+                detected_at=o.detected_at,
+            )
+        )
+    return out
 
 
 @router.get("/brands/{brand_id}/engine-mix")

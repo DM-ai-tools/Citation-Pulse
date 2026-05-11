@@ -93,6 +93,26 @@ class GapRead(BaseModel):
     reason: str
 
 
+class OpportunityRead(BaseModel):
+    """Top gap opportunity row (from nightly `detect_opportunities` job)."""
+
+    id: uuid.UUID
+    brand_id: uuid.UUID
+    prompt_id: uuid.UUID
+    title: str
+    gap_type: str
+    scope: str | None = None
+    grade: str
+    heat: str
+    opportunity_score: float
+    description: str
+    est_volume: int | None
+    status: str
+    detected_at: datetime
+
+    model_config = {"from_attributes": False}
+
+
 class AlertRuleCreate(BaseModel):
     brand_id: uuid.UUID | None = None
     rule: str

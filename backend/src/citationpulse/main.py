@@ -81,6 +81,7 @@ def root():
             "scan_report": "GET /api/v1/scans/{scan_id}/report",
             "scan_stream": "GET /api/v1/scans/{scan_id}/stream (SSE)",
             "public_share": "GET /api/v1/scans/public/{token}",
+            "brand_opportunities": "GET /api/v1/brands/{brand_id}/opportunities?status=open",
         },
         "web_app": "http://localhost:3000",
     }
