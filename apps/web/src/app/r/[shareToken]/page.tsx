@@ -110,6 +110,8 @@ export default function PublicReportPage() {
 
         <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
 
+        <TopGapOpportunities id="top-gap-opportunities" opportunities={d.opportunities ?? []} />
+
         <div className="grid gap-6 lg:grid-cols-12 lg:items-start">
           <div className="space-y-6 lg:col-span-7">
             <CitationHeatmap
@@ -128,7 +130,6 @@ export default function PublicReportPage() {
               engineCount={d.engines.length}
               citationScore={layerScore}
             />
-            <TopGapOpportunities opportunities={d.opportunities ?? []} />
           </div>
           <div className="space-y-6 lg:col-span-5">
             <PromptEngineScoreMatrix

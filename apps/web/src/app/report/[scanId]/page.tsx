@@ -128,6 +128,11 @@ export default function ReportPage() {
         <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
       </div>
 
+      {/* Full-width above the heatmap so Top gap opportunities matches /dashboard prominence and is not lost below the fold (prod users often scroll straight to citations). */}
+      <div className="mx-auto max-w-[1280px] px-6 pt-5">
+        <TopGapOpportunities id="top-gap-opportunities" opportunities={d.opportunities ?? []} />
+      </div>
+
       <div className="mx-auto grid max-w-[1280px] gap-6 px-6 py-6 pb-8 lg:grid-cols-[1.4fr_1fr] lg:items-start">
         <div className="flex flex-col gap-5">
           <CitationHeatmap
@@ -147,7 +152,6 @@ export default function ReportPage() {
             engineCount={d.engines.length}
             citationScore={layerScore}
           />
-          <TopGapOpportunities opportunities={d.opportunities ?? []} />
           <CitationsList
             cells={allCells}
             engineFilter={layer}

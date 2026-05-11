@@ -27,14 +27,18 @@ function heatPillClass(grade: string) {
 export function TopGapOpportunities({
   opportunities,
   className,
+  id,
 }: {
   opportunities: OpportunityRow[];
   className?: string;
+  /** Optional anchor id for in-page links (e.g. report hero CTA). */
+  id?: string;
 }) {
-  const rows = opportunities ?? [];
+  const rows = Array.isArray(opportunities) ? opportunities : [];
 
   return (
     <section
+      id={id}
       data-testid="top-gap-opportunities"
       className={cn(
         "overflow-hidden rounded-[18px] border border-tr-line bg-white shadow-[0_8px_30px_rgba(10,37,64,0.06)]",
