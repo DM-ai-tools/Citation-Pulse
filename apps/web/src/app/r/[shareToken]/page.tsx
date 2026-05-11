@@ -128,6 +128,7 @@ export default function PublicReportPage() {
               engineCount={d.engines.length}
               citationScore={layerScore}
             />
+            <TopGapOpportunities opportunities={d.opportunities ?? []} />
           </div>
           <div className="space-y-6 lg:col-span-5">
             <PromptEngineScoreMatrix
@@ -146,8 +147,6 @@ export default function PublicReportPage() {
             />
           </div>
         </div>
-
-        <TopGapOpportunities opportunities={d.opportunities ?? []} />
 
         <PublicCheckYourOwnCta />
       </Container>

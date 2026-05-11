@@ -147,6 +147,7 @@ export default function ReportPage() {
             engineCount={d.engines.length}
             citationScore={layerScore}
           />
+          <TopGapOpportunities opportunities={d.opportunities ?? []} />
           <CitationsList
             cells={allCells}
             engineFilter={layer}
@@ -157,10 +158,6 @@ export default function ReportPage() {
           <PromptEngineScoreMatrix prompts={d.prompts} engines={d.engines} cells={d.matrix.cells} />
           <DfyCta />
         </div>
-      </div>
-
-      <div className="mx-auto max-w-[1280px] px-6 pb-10">
-        <TopGapOpportunities opportunities={d.opportunities ?? []} />
       </div>
 
       <p className="pb-10 text-center text-[13px] text-tr-mute">
