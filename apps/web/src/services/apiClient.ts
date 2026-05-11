@@ -1,4 +1,22 @@
-const base = () => process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+let _warnedMisconfiguredApi = false;
+
+function base(): string {
+  const u = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  if (
+    !_warnedMisconfiguredApi &&
+    typeof window !== "undefined" &&
+    (u.includes("127.0.0.1") || u.includes("localhost")) &&
+    !/^localhost$|^127\.0\.0\.1$/i.test(window.location.hostname)
+  ) {
+    _warnedMisconfiguredApi = true;
+    console.warn(
+      "[CitationPulse] NEXT_PUBLIC_API_URL points at localhost but this page is not on localhost. " +
+        "Set NEXT_PUBLIC_API_URL to your public API URL at Next.js build time (Railway: Web service → Variables → rebuild). " +
+        "Otherwise the UI may call the wrong host and sections like Top gap opportunities can look empty."
+    );
+  }
+  return u;
+}
 
 /** Resolved API origin (same value used for fetch). Exposed for user-facing errors — not a secret. */
 export function publicApiBaseUrl(): string {

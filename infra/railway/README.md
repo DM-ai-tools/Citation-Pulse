@@ -67,7 +67,7 @@ Set these at minimum on API:
 
 Set these on Web:
 
-- `NEXT_PUBLIC_API_URL=https://<your-api-domain>`
+- `NEXT_PUBLIC_API_URL=https://<your-api-domain>` — **must be present when `npm run build` runs** (Docker/Railway build). Changing it requires a **Web service rebuild**, not only a restart, or the browser will still use the old inlined URL (often `localhost:8000`, which breaks production data like Top gap opportunities).
 
 Optional but recommended:
 
