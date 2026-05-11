@@ -23,6 +23,7 @@ from citationpulse.models.domain import (
     default_engines,
 )
 from citationpulse.services.embeddings import embed_texts
+from citationpulse.services.llm_router import LLMProviderError
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.ownership import classify_domain
 from citationpulse.services.sentiment import classify_snippet
@@ -112,8 +113,8 @@ def normalise_citations_for_run(db: Session, run: EngineRun) -> bool:
     return True
 
 
-@celery_app.task(name="citationpulse.run_engine", bind=True, max_retries=3)
-def run_engine_task(self, run_id: str) -> str:
+@celery_app.task(name="citationpulse.run_engine")
+def run_engine_task(run_id: str) -> str:
     db = SessionLocal()
     try:
         run = db.get(EngineRun, UUID(run_id))
@@ -141,14 +142,24 @@ def run_engine_task(self, run_id: str) -> str:
             )
         except Exception as exc:  # noqa: BLE001
             run.status = RunStatus.ERROR.value
-            run.error_message = str(exc)
+            msg = str(exc)
+            if isinstance(exc, LLMProviderError) and exc.status_code == 401:
+                msg = (
+                    "OpenRouter rejected the request (HTTP 401). "
+                    "Set OPENROUTER_API_KEY on Railway for this service (same value as local .env). "
+                    f"Details: {exc.body[:400]}"
+                )
+            run.error_message = msg[:4000]
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
             if run.scan_id:
                 db.refresh(run)
                 publish_cell_update(db, run)
                 maybe_complete_scan(db, run.scan_id)
-            raise self.retry(exc=exc, countdown=60) from exc
+            # Do not Celery-retry here: eager mode runs inside Starlette BackgroundTasks and
+            # `raise self.retry` surfaces as "Exception in ASGI application" after POST /scans.
+            _log.warning("run_engine failed run_id=%s engine=%s: %s", run_id, run.engine, exc)
+            return "error"
 
         run.raw_ref = resp.raw_payload_ref
         run.cost_usd = resp.cost_usd

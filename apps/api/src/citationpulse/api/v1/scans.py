@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
@@ -25,10 +26,14 @@ from citationpulse.services.scans_flow import (
 from citationpulse.tasks.geo import fan_out_scan_task
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+_log = logging.getLogger(__name__)
 
 
 def _enqueue_fan_out_scan(scan_id: str) -> None:
-    fan_out_scan_task.delay(scan_id)
+    try:
+        fan_out_scan_task.delay(scan_id)
+    except Exception:
+        _log.exception("fan_out_scan failed scan_id=%s", scan_id)
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
