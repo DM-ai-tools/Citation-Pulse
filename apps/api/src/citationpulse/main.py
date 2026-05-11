@@ -34,12 +34,36 @@ async def lifespan(app: FastAPI):
 
 
 settings = get_settings()
-origins = [o.strip() for o in settings.api_cors_origins.split(",") if o.strip()]
+
+
+def _normalise_origin(origin: str) -> str:
+    return origin.strip().rstrip("/")
+
+
+origins = [_normalise_origin(o) for o in settings.api_cors_origins.split(",") if o.strip()]
+
+# Browsers send different `Origin` values for the same machine (localhost vs 127.0.0.1 vs LAN IP,
+# optional port). With `credentials: "include"`, the response must echo `Access-Control-Allow-Origin`
+# for that exact origin — a mismatch surfaces as "Failed to fetch", not a readable CORS error.
+_railway_origin_regex = r"^https://([a-z0-9-]+\.)*up\.railway\.app$"
+_loopback_regex = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+_rfc1918_http_regex = (
+    r"^http://("
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}"
+    r"):\d+$"
+)
+if settings.environment.lower() == "production":
+    _cors_origin_regex = f"{_railway_origin_regex}|{_loopback_regex}"
+else:
+    _cors_origin_regex = f"{_railway_origin_regex}|{_loopback_regex}|{_rfc1918_http_regex}"
 
 app = FastAPI(title="CitationPulse API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins or ["*"],
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -8,6 +8,8 @@
   "scripts": {
     "install:all": "npm install",
     "dev": "npm run dev -w citationpulse-web",
+    "dev:api": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-api.ps1",
+    "dev:stack": "concurrently -k -n web,api -c blue,magenta \"npm run dev -w citationpulse-web\" \"npm run dev:api\"",
     "dev:web": "npm run dev -w citationpulse-web",
     "dev:geo:web": "npm run dev -w citationpulse-web",
     "build": "npm run build -w citationpulse-web",

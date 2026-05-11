@@ -1,5 +1,10 @@
 const base = () => process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+/** Resolved API origin (same value used for fetch). Exposed for user-facing errors — not a secret. */
+export function publicApiBaseUrl(): string {
+  return base();
+}
+
 export type ApiClientOptions = RequestInit & {
   getToken?: () => Promise<string | null>;
 };

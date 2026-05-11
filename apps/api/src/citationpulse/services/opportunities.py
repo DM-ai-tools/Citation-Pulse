@@ -40,11 +40,13 @@ def _scope_key(engine: str | None) -> str:
 
 
 def engine_label(engine: str) -> str:
+    """Display names for engines in opportunity copy (default product = four LLM engines)."""
     return {
         "chatgpt": "ChatGPT",
         "claude": "Claude",
         "gemini": "Gemini",
         "perplexity": "Perplexity",
+        # Legacy rows only — Google AIO is not part of required product scans.
         "google_aio": "AI Overviews",
     }.get(engine, engine.replace("_", " ").title())
 
@@ -136,6 +138,12 @@ def classify_gap(
         if prev.get(e) in (CITED_TOP, CITED_LOWER) and latest.get(e, MISSING) == COMPETITOR_ONLY:
             return ("refresh_content", e)
 
+    # Fallback: mixed matrix (common on 4-engine scans) — brand cited or competitors show on some engines
+    # but at least one engine is still MISSING. Stricter rules above often return None; this still surfaces
+    # a concrete "fix this engine / footprint" row for the report card.
+    if missing and (cited or comp):
+        return ("extend_presence", sorted(missing)[0])
+
     return None
 
 
@@ -164,11 +172,12 @@ def opportunity_score(
     competitor_cites: int,
     consecutive_gap_runs: int,
 ) -> float:
+    n_eng = max(len(latest_states), 1)
     vol = min(math.log10(max(est_volume or 1, 1)) / 5.0, 1.0)
     miss = sum(1 for c in latest_states.values() if c == MISSING)
     comp = sum(1 for c in latest_states.values() if c == COMPETITOR_ONLY)
-    gap = (miss + 0.5 * comp) / 5.0
-    cscore = min(competitor_cites / 5.0, 1.0)
+    gap = (miss + 0.5 * comp) / float(n_eng)
+    cscore = min(competitor_cites / float(n_eng), 1.0)
     persist = min(consecutive_gap_runs / 7.0, 1.0)
     s = 0.40 * vol + 0.30 * gap + 0.20 * cscore + 0.10 * persist
     if gap_type == "absent_all" and (est_volume or 0) > 5000:
@@ -194,6 +203,7 @@ TEMPLATES: dict[str, str] = {
     "engine_specific_gap": "Cited on {cited} engines but absent from {engine_label}",
     "weak_engine": "Strong on APIs, weak on {engine_label} · {vol}/mo",
     "refresh_content": "{top_competitor} dominates on this engine · refresh content",
+    "extend_presence": "Brand not visible on {engine_label} · {absent_n} of {n} engines still open · {vol}/mo demand",
 }
 
 
@@ -226,11 +236,13 @@ def build_description(
     comp_count = sum(1 for e in engines if latest_states.get(e) == COMPETITOR_ONLY)
     cited_count = sum(1 for e in engines if latest_states.get(e) in (CITED_TOP, CITED_LOWER))
     vol = fmt_volume(est_volume)
+    absent_n = sum(1 for e in engines if latest_states.get(e, MISSING) == MISSING)
     ctx: dict[str, Any] = {
         "n": n,
         "vol": vol,
         "comp": comp_count,
         "cited": cited_count,
+        "absent_n": absent_n,
         "engine_label": engine_label(scope_engine) if scope_engine else "",
         "top_competitor": top_competitor,
         "gap_type": gap_type,

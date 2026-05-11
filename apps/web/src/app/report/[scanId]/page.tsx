@@ -12,6 +12,7 @@ import { HeatmapBreakdownCards } from "@/components/report/HeatmapBreakdownCards
 import { PromptEngineScoreMatrix } from "@/components/report/PromptEngineScoreMatrix";
 import { ReportHero } from "@/components/report/ReportHero";
 import { ReportTopBar } from "@/components/report/ReportTopBar";
+import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
 import { ErrorState, Skeleton } from "@/components/primitives";
 import { useReport } from "@/hooks/useReport";
 import { rememberDashboardScan } from "@/lib/dashboardScanPreference";
@@ -127,7 +128,7 @@ export default function ReportPage() {
         <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
       </div>
 
-      <div className="mx-auto grid max-w-[1280px] gap-6 px-6 py-6 pb-16 lg:grid-cols-[1.4fr_1fr] lg:items-start">
+      <div className="mx-auto grid max-w-[1280px] gap-6 px-6 py-6 pb-8 lg:grid-cols-[1.4fr_1fr] lg:items-start">
         <div className="flex flex-col gap-5">
           <CitationHeatmap
             prompts={d.prompts}
@@ -156,6 +157,10 @@ export default function ReportPage() {
           <PromptEngineScoreMatrix prompts={d.prompts} engines={d.engines} cells={d.matrix.cells} />
           <DfyCta />
         </div>
+      </div>
+
+      <div className="mx-auto max-w-[1280px] px-6 pb-10">
+        <TopGapOpportunities opportunities={d.opportunities ?? []} />
       </div>
 
       <p className="pb-10 text-center text-[13px] text-tr-mute">

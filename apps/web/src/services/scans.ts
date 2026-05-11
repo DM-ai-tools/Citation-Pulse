@@ -1,8 +1,8 @@
-import { apiFetch } from "./apiClient";
+import { apiFetch, publicApiBaseUrl } from "./apiClient";
 import type { ReportData } from "@/types/report";
 import type { ScanSnapshot } from "@/types/scan";
 
-const scanPostTimeoutMs = 90_000;
+const scanPostTimeoutMs = 60_000;
 
 export async function createScan(body: {
   url: string;
@@ -45,6 +45,5 @@ export async function shareScan(scanId: string, share_public = true) {
 }
 
 export function scanStreamUrl(scanId: string) {
-  const b = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  return `${b}/api/v1/scans/${scanId}/stream`;
+  return `${publicApiBaseUrl()}/api/v1/scans/${scanId}/stream`;
 }

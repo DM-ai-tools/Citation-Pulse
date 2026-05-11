@@ -27,6 +27,8 @@ export function engineLetter(engine: string) {
 }
 
 export function engineTitle(engine: string) {
+  // Legacy matrix rows only — product scans do not run Google AIO.
+  if (engine === "google_aio") return "AI Overviews";
   return ENGINE_LABEL[engine] ?? engine;
 }
 

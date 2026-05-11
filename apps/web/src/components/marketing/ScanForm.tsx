@@ -8,10 +8,21 @@ import { Select } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import { rememberDashboardScan } from "@/lib/dashboardScanPreference";
 import { scanFormSchema } from "@/lib/validation";
+import { publicApiBaseUrl } from "@/services/apiClient";
 import { createScan } from "@/services/scans";
 
 function truncate(s: string, n: number) {
   return s.length <= n ? s : `${s.slice(0, n)}…`;
+}
+
+/** True when the resolved API base is typical local dev (nothing listening → timeout). */
+function looksLikeLocalApi(baseUrl: string): boolean {
+  try {
+    const u = new URL(baseUrl);
+    return u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+  } catch {
+    return /localhost|127\.0\.0\.1/i.test(baseUrl);
+  }
 }
 
 const MAX_PROMPTS = 8;
@@ -209,9 +220,15 @@ export function ScanForm({ className }: { className?: string }) {
       toast.success("Scan started");
       router.push(`/scan/${res.scan_id}`);
     } catch (err: unknown) {
+      const api = publicApiBaseUrl();
       let msg = "Something went wrong";
       if (err instanceof Error) {
-        msg = err.name === "TimeoutError" ? "Request timed out — check the API is reachable." : err.message;
+        const timedOut =
+          err.name === "TimeoutError" ||
+          (typeof err.message === "string" && err.message.toLowerCase().includes("timed out"));
+        msg = timedOut
+          ? `Request timed out while contacting ${api}. Is the API running and reachable from your browser?`
+          : err.message;
       }
       setSubmitError(msg);
       toast.error(msg);
@@ -356,10 +373,51 @@ export function ScanForm({ className }: { className?: string }) {
           {submitError ? (
             <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-center text-[13px] text-red-800">
               {submitError}
-              <span className="mt-1 block text-[11.5px] text-red-700/90">
-                Tip: set <code className="rounded bg-red-100 px-1">NEXT_PUBLIC_API_URL</code> to your API (same
-                browser-reachable URL) and ensure CORS allows this site.
-              </span>
+              {looksLikeLocalApi(publicApiBaseUrl()) ? (
+                <span className="mt-1 block text-[11.5px] text-red-700/90">
+                  {submitError.toLowerCase().includes("failed to fetch") ? (
+                    <>
+                      <strong className="font-semibold">What this usually means:</strong> open{" "}
+                      <strong className="font-semibold">DevTools → Network</strong>, submit again, and inspect{" "}
+                      <code className="rounded bg-red-100 px-1">POST /api/v1/scans</code>. A{" "}
+                      <strong className="font-semibold">500</strong> (for example a missing DB column such as{" "}
+                      <code className="rounded bg-red-100 px-1">consecutive_gap_runs</code>) often surfaces in the
+                      browser only as &quot;Failed to fetch&quot; or a CORS warning. Fix the API/DB first: from{" "}
+                      <code className="rounded bg-red-100 px-1">infra/sql</code> run{" "}
+                      <code className="rounded bg-red-100 px-1">alembic upgrade head</code> with{" "}
+                      <code className="rounded bg-red-100 px-1">DATABASE_URL</code> set — see{" "}
+                      <code className="rounded bg-red-100 px-1">infra/sql/README.md</code>. Confirm the API responds:{" "}
+                      <a
+                        className="font-semibold text-red-900 underline decoration-red-400 underline-offset-2 hover:text-red-950"
+                        href={`${publicApiBaseUrl()}/health`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {publicApiBaseUrl()}/health
+                      </a>
+                      . If the POST row never appears or /health does not load, start FastAPI in another terminal:{" "}
+                      <code className="rounded bg-red-100 px-1">npm run dev:api</code> or{" "}
+                      <code className="rounded bg-red-100 px-1">npm run dev:stack</code> (Windows). Postgres must be
+                      running; see <code className="rounded bg-red-100 px-1">docs/SETUP_WINDOWS.md</code>.
+                    </>
+                  ) : (
+                    <>
+                      <strong className="font-semibold">Local dev:</strong> <code className="rounded bg-red-100 px-1">npm
+                      run dev</code> only starts Next.js. Start FastAPI on port 8000: open another terminal at the repo
+                      root and run <code className="rounded bg-red-100 px-1">npm run dev:api</code>, or run both with{" "}
+                      <code className="rounded bg-red-100 px-1">npm run dev:stack</code> (Windows). Postgres must be up;
+                      see <code className="rounded bg-red-100 px-1">docs/SETUP_WINDOWS.md</code>.
+                    </>
+                  )}
+                </span>
+              ) : (
+                <span className="mt-1 block text-[11.5px] text-red-700/90">
+                  Production: set Railway/Vercel <code className="rounded bg-red-100 px-1">NEXT_PUBLIC_API_URL</code>{" "}
+                  to your public API URL (e.g. https://…railway.app), <strong className="font-semibold">rebuild the web
+                  app</strong> (Next bakes this at build time). On the API, add this site to{" "}
+                  <code className="rounded bg-red-100 px-1">API_CORS_ORIGINS</code>.
+                </span>
+              )}
             </p>
           ) : (
             <p className="mt-3 text-center text-[11.5px] text-tr-mute">

@@ -19,9 +19,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.sql import text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from citationpulse.db.base import Base
@@ -135,10 +135,10 @@ class Brand(Base):
     )
     name: Mapped[str] = mapped_column(String(512), nullable=False)
     domains: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{}'")
+        ARRAY(Text), nullable=False, server_default=sql_text("'{}'")
     )
     competitors: Mapped[list[uuid.UUID]] = mapped_column(
-        ARRAY(UUID(as_uuid=True)), nullable=False, server_default=text("'{}'::uuid[]")
+        ARRAY(UUID(as_uuid=True)), nullable=False, server_default=sql_text("'{}'::uuid[]")
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -162,7 +162,7 @@ class Scan(Base):
     )
     submitted_url: Mapped[str] = mapped_column(Text, nullable=False)
     locale: Mapped[str] = mapped_column(String(32), nullable=False, default="en-US")
-    engines: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    engines: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=sql_text("'{}'::text[]"))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     score_overall: Mapped[int | None] = mapped_column(Integer)
     share_token: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
@@ -188,7 +188,7 @@ class Prompt(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     # Consecutive runs where this prompt still matched a gap (used in opportunity scoring).
-    consecutive_gap_runs: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    consecutive_gap_runs: Mapped[int] = mapped_column(Integer, nullable=False, server_default=sql_text("0"))
 
     brand: Mapped[Brand] = relationship(back_populates="prompts")
     engine_runs: Mapped[list[EngineRun]] = relationship(back_populates="prompt")
@@ -359,7 +359,7 @@ class Opportunity(Base):
     )
     gap_type: Mapped[str] = mapped_column(String(64), nullable=False)
     # Engine slug when gap is engine-specific; empty string when global (avoids UNIQUE NULL issues in PG).
-    scope: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))
+    scope: Mapped[str] = mapped_column(String(64), nullable=False, server_default=sql_text("''"))
     grade: Mapped[str] = mapped_column(String(4), nullable=False)
     opportunity_score: Mapped[Any] = mapped_column(Numeric(6, 4), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)

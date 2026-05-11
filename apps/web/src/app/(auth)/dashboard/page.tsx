@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import {
   flexRender,
   getCoreRowModel,
@@ -20,6 +20,7 @@ import {
 import { ExternalLink } from "lucide-react";
 import { Card, ErrorState, Skeleton } from "@/components/primitives";
 import { CitationHeatmap } from "@/components/report/CitationHeatmap";
+import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
 import { apiFetch } from "@/lib/api";
 import { DASHBOARD_LAST_SCAN_STORAGE_KEY } from "@/lib/dashboardScanPreference";
 import { engineTitle } from "@/lib/engineDisplay";
@@ -433,33 +434,38 @@ function ScanDashboard({ data, linkedFromLanding }: { data: ReportData; linkedFr
   const website = websiteFromScanReport(data);
 
   return (
-    <DashboardShell
-      brandDisplayName={brandDisplayName}
-      website={website}
-      headerMeta={
-        <>
-          <p className="mt-1 font-mono text-xs text-slate-400">Scan {data.scan_id}</p>
-          {linkedFromLanding ? (
-            <p className="mt-2 text-xs text-slate-600">
-              SoV and KPIs match your citation report for the site you submitted on the landing page. Run a new scan
-              there anytime to refresh this workspace view.
-            </p>
-          ) : null}
-        </>
-      }
-      sovPct={sovPct}
-      sovFootnote="Same 30-day breakdown as the citation report for this scan."
-      citationTotal={totalCitationsInMatrix(cells)}
-      citationLabel="Citations (this scan)"
-      citationFootnote="Citation rows attached to this scan’s matrix cells."
-      prompts={data.prompts}
-      engines={engines}
-      cells={cells}
-      chartRows={chartRows}
-      mixTitle="Engine mix (this scan)"
-      mixFootnote="Citations captured per engine from the matrix above"
-      tableRows={tableRows}
-    />
+    <Fragment>
+      <DashboardShell
+        brandDisplayName={brandDisplayName}
+        website={website}
+        headerMeta={
+          <>
+            <p className="mt-1 font-mono text-xs text-slate-400">Scan {data.scan_id}</p>
+            {linkedFromLanding ? (
+              <p className="mt-2 text-xs text-slate-600">
+                SoV and KPIs match your citation report for the site you submitted on the landing page. Run a new scan
+                there anytime to refresh this workspace view.
+              </p>
+            ) : null}
+          </>
+        }
+        sovPct={sovPct}
+        sovFootnote="Same 30-day breakdown as the citation report for this scan."
+        citationTotal={totalCitationsInMatrix(cells)}
+        citationLabel="Citations (this scan)"
+        citationFootnote="Citation rows attached to this scan’s matrix cells."
+        prompts={data.prompts}
+        engines={engines}
+        cells={cells}
+        chartRows={chartRows}
+        mixTitle="Engine mix (this scan)"
+        mixFootnote="Citations captured per engine from the matrix above"
+        tableRows={tableRows}
+      />
+      <div className="mt-8 max-w-6xl">
+        <TopGapOpportunities opportunities={data.opportunities ?? []} />
+      </div>
+    </Fragment>
   );
 }
 

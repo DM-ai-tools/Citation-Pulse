@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from citationpulse.models.domain import (
 from citationpulse.services.events import publish_scan_event
 
 ANON_TENANT_MARKER = "anonymous_scans"
+_log = logging.getLogger(__name__)
 
 
 # All supported engines are routed through OpenRouter, so a single API key
@@ -56,6 +58,7 @@ def available_engines(requested: list[str] | None = None) -> list[str]:
     has_openrouter = openrouter_configured(settings)
     kept: list[str] = []
     for e in base:
+        # Product scans use OpenRouter-backed engines only; Google AI Overviews (Playwright) is not required.
         if e == EngineType.GOOGLE_AIO.value:
             continue
         if e in _LLM_ENGINES:
@@ -164,6 +167,17 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
             str(scan.id),
             {"type": "scan.completed", "score": scan.score_overall or 0},
         )
+    if was_new and scan.brand_id:
+        try:
+            from citationpulse.services.opportunities import detect_opportunities_for_brand
+
+            detect_opportunities_for_brand(db, scan.brand_id)
+        except Exception:
+            _log.exception(
+                "detect_opportunities_for_brand after scan completion failed scan_id=%s brand_id=%s",
+                scan_id,
+                scan.brand_id,
+            )
 
 
 def _cell_citations_payload(cites: list[Citation], limit: int = 8) -> list[dict[str, object]]:
@@ -380,9 +394,52 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
             cb = db.get(Brand, cid)
             if cb:
                 competitors.append({"id": str(cb.id), "name": cb.name, "domains": ",".join(cb.domains or [])})
+
+    opportunities: list[dict[str, object]] = []
+    if brand:
+        from citationpulse.services.opportunities import (
+            detect_opportunities_for_brand,
+            heat_from_grade,
+            list_opportunities_for_brand,
+        )
+
+        rows = list_opportunities_for_brand(db, brand.id, status="open")
+        if not rows and scan.status == "completed":
+            try:
+                detect_opportunities_for_brand(db, brand.id)
+                rows = list_opportunities_for_brand(db, brand.id, status="open")
+            except Exception:
+                _log.exception(
+                    "detect_opportunities_for_brand during build_scan_report failed scan_id=%s brand_id=%s",
+                    scan.id,
+                    brand.id,
+                )
+        for o in rows[:50]:
+            pr = db.get(Prompt, o.prompt_id)
+            title = (pr.text if pr else "")[:512] or "(prompt)"
+            scope_val = o.scope if (o.scope or "").strip() else None
+            opportunities.append(
+                {
+                    "id": str(o.id),
+                    "brand_id": str(o.brand_id),
+                    "prompt_id": str(o.prompt_id),
+                    "title": title,
+                    "gap_type": o.gap_type,
+                    "scope": scope_val,
+                    "grade": o.grade,
+                    "heat": heat_from_grade(o.grade),
+                    "opportunity_score": float(o.opportunity_score),
+                    "description": o.description,
+                    "est_volume": o.est_volume,
+                    "status": o.status,
+                    "detected_at": o.detected_at.isoformat() if o.detected_at else None,
+                }
+            )
+
     return {
         **snap,
         "gaps": gaps[:50],
         "breakdown": breakdown,
         "competitors": competitors,
+        "opportunities": opportunities,
     }

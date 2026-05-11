@@ -41,14 +41,25 @@ def _normalise_origin(origin: str) -> str:
 
 
 origins = [_normalise_origin(o) for o in settings.api_cors_origins.split(",") if o.strip()]
-railway_origin_regex = r"^https:\/\/([a-z0-9-]+\.)*up\.railway\.app$"
-local_origin_regex = r"^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$"
+railway_origin_regex = r"^https://([a-z0-9-]+\.)*up\.railway\.app$"
+loopback_regex = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+rfc1918_http_regex = (
+    r"^http://("
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}"
+    r"):\d+$"
+)
+if settings.environment.lower() == "production":
+    cors_origin_regex = f"{railway_origin_regex}|{loopback_regex}"
+else:
+    cors_origin_regex = f"{railway_origin_regex}|{loopback_regex}|{rfc1918_http_regex}"
 
 app = FastAPI(title="CitationPulse API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins or ["*"],
-    allow_origin_regex=f"{railway_origin_regex}|{local_origin_regex}",
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

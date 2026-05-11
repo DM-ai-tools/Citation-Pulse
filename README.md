@@ -65,11 +65,12 @@ Once Postgres is running, `.env` is configured, and migrations are applied:
 
 | What           | Command                                                                                                  | URL                                            |
 | -------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| FastAPI        | `uvicorn citationpulse.main:app --reload --host 0.0.0.0 --port 8000 --app-dir src` (from `apps/api`)     | http://localhost:8000 (docs at `/docs`)        |
+| Web + API (Win)| `npm run dev:stack` (from repo root; uses `scripts/start-api.ps1`)                                       | :3000 web, :8000 API                           |
+| FastAPI        | `npm run dev:api` (repo root, Windows) or `uvicorn citationpulse.main:app --reload --host 0.0.0.0 --port 8000` with `PYTHONPATH=apps/api/src` | http://localhost:8000 (docs at `/docs`)        |
 | Celery worker  | `celery -A citationpulse.celery_app worker -l info --pool=solo` (from `apps/api`)                        | —                                              |
 | Next.js (web)  | `npm run dev` (from repo root, or `npm run dev -w citationpulse-web`)                                    | http://localhost:3000                          |
 
-The root `npm run dev` now starts **only** the Next.js app on `:3000`. To run the FastAPI + Celery stack, follow `docs/SETUP_WINDOWS.md`.
+The root `npm run dev` starts **only** the Next.js app on `:3000`. The browser still calls the API at `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`), so you must run FastAPI separately—or on **Windows**, use **`npm run dev:stack`** to start web + API together (second terminal is still needed for Celery: `scripts\\start-worker.ps1`). Full setup: `docs/SETUP_WINDOWS.md`.
 
 ## Environment
 

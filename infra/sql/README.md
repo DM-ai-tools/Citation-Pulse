@@ -1,6 +1,6 @@
 # SQL & Alembic
 
-- **Migrations:** run from repo root with `DATABASE_URL` set:
+- **Migrations:** run from repo root with `DATABASE_URL` set (same URL as the API, but Alembic needs it in the shell environment):
 
 ```bash
 # POSIX
@@ -13,6 +13,8 @@ cd infra/sql && alembic upgrade head
 $env:DATABASE_URL="postgresql+psycopg://citationpulse:citationpulse@localhost:5434/citationpulse_geo"
 cd infra/sql; alembic upgrade head
 ```
+
+- **One-off SQL:** [`20260208_opportunities_prompt_metrics.sql`](20260208_opportunities_prompt_metrics.sql) matches revision `20260511100000` (adds `prompts.consecutive_gap_runs`, `prompt_metrics`, `opportunities`). If `alembic upgrade head` is not an option, you can `psql` that file instead.
 
 - **RLS:** optional policies for production are documented in [`rls_optional.sql`](rls_optional.sql). Apply when the API sets `SET LOCAL app.tenant_id` on every request-scoped DB connection.
 

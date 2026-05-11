@@ -10,6 +10,7 @@ import { HeatmapBreakdownCards } from "@/components/report/HeatmapBreakdownCards
 import { PromptEngineScoreMatrix } from "@/components/report/PromptEngineScoreMatrix";
 import { PublicCheckYourOwnCta } from "@/components/report/PublicCheckYourOwnCta";
 import { PublicReportFooter } from "@/components/report/PublicReportFooter";
+import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
 import { PublicReportTopBar } from "@/components/report/PublicReportTopBar";
 import { ReportHero } from "@/components/report/ReportHero";
 import { Container } from "@/components/layout/Container";
@@ -145,6 +146,8 @@ export default function PublicReportPage() {
             />
           </div>
         </div>
+
+        <TopGapOpportunities opportunities={d.opportunities ?? []} />
 
         <PublicCheckYourOwnCta />
       </Container>
