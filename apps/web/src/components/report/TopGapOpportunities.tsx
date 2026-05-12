@@ -24,6 +24,22 @@ function heatPillClass(grade: string) {
   return "bg-cyan-100 text-cyan-900 ring-1 ring-cyan-200/80";
 }
 
+/** `prompt_metrics.est_volume` — show compact label when API provides it. */
+function formatMonthlySearches(v: number | null | undefined): string {
+  if (v == null || typeof v !== "number" || !Number.isFinite(v) || v <= 0) return "—";
+  if (v >= 1_000_000) {
+    const m = v / 1_000_000;
+    const s = (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10).toString();
+    return `${s.replace(/\.0$/, "")}M`;
+  }
+  if (v >= 1000) {
+    const k = v / 1000;
+    const s = (k >= 10 ? Math.round(k) : Math.round(k * 10) / 10).toString();
+    return `${s.replace(/\.0$/, "")}k`;
+  }
+  return String(Math.round(v));
+}
+
 export function TopGapOpportunities({
   opportunities,
   className,
@@ -62,7 +78,10 @@ export function TopGapOpportunities({
       ) : (
         <ul className="divide-y divide-tr-line">
           {rows.map((row) => (
-            <li key={row.id} className="flex items-start gap-3 px-[22px] py-4 sm:gap-4">
+            <li
+              key={row.id}
+              className="flex flex-wrap items-start gap-3 px-[22px] py-4 sm:flex-nowrap sm:gap-4"
+            >
               <div
                 className={cn(
                   "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-display text-base font-black",
@@ -72,19 +91,29 @@ export function TopGapOpportunities({
               >
                 {row.grade}
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 basis-[min(100%,16rem)] sm:basis-auto">
                 <p className="font-display text-[14.5px] font-bold leading-snug text-tr-navy">{rowTitle(row)}</p>
                 <p className="mt-1 text-[12.5px] leading-relaxed text-tr-mute">{row.description}</p>
               </div>
-              <div className="shrink-0 pt-0.5">
-                <span
-                  className={cn(
-                    "inline-flex rounded-full px-2.5 py-1 font-display text-[10.5px] font-extrabold uppercase tracking-wide",
-                    heatPillClass(row.grade),
-                  )}
-                >
-                  {row.heat} · {row.grade}
-                </span>
+              <div className="ml-auto flex shrink-0 items-start gap-4 sm:ml-0">
+                <div className="text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-tr-mute">
+                    Est. monthly searches
+                  </p>
+                  <p className="mt-0.5 font-display text-[15px] font-black tabular-nums text-tr-navy">
+                    {formatMonthlySearches(row.est_volume)}
+                  </p>
+                </div>
+                <div className="pt-0.5">
+                  <span
+                    className={cn(
+                      "inline-flex rounded-full px-2.5 py-1 font-display text-[10.5px] font-extrabold uppercase tracking-wide",
+                      heatPillClass(row.grade),
+                    )}
+                  >
+                    {row.heat} · {row.grade}
+                  </span>
+                </div>
               </div>
             </li>
           ))}
