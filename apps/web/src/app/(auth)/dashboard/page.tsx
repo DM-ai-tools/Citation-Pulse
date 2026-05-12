@@ -8,7 +8,9 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  type TooltipProps,
 } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import {
@@ -175,15 +177,9 @@ function engineMixFromMatrix(cells: MatrixCell[], engines: string[]): { engine: 
   }));
 }
 
-type MixTooltipProps = {
-  active?: boolean;
-  payload?: { value?: number; name?: string }[];
-  label?: string;
-};
-
-function EngineMixTooltip({ active, payload, label }: MixTooltipProps) {
+function EngineMixTooltip({ active, payload, label }: TooltipProps<ValueType, NameType>) {
   if (!active || !payload?.length) return null;
-  const n = payload[0]?.value;
+  const n = Number(payload[0]?.value);
   return (
     <div className="rounded-xl border border-tr-line bg-white px-4 py-3 shadow-lift">
       <p className="font-display text-[10px] font-extrabold uppercase tracking-wide text-tr-mute">{label}</p>
@@ -380,7 +376,7 @@ function DashboardShell(props: {
                   />
                   <Tooltip
                     cursor={{ fill: "rgba(31, 179, 107, 0.10)" }}
-                    content={(tipProps) => <EngineMixTooltip {...tipProps} />}
+                    content={(tipProps) => <EngineMixTooltip {...(tipProps as TooltipProps<ValueType, NameType>)} />}
                   />
                   <Bar
                     dataKey="citations"
