@@ -35,6 +35,7 @@ from citationpulse.services.opportunities import heat_from_grade, list_opportuni
 from citationpulse.services.rate_limit import allow_ad_hoc_run
 from citationpulse.services.scorer import trend_citations_per_day
 from citationpulse.services.sov import compute_sov
+from citationpulse.services.sov_entities import entity_weekly_share_trend, multientity_sov_by_engine
 
 router = APIRouter(dependencies=[Depends(get_auth_context)])
 
@@ -207,6 +208,45 @@ def get_sov_trend(brand_id: UUID, db: DbSession, tenant: CurrentTenant, days: in
     if not b or b.tenant_id != tenant.id:
         raise HTTPException(status_code=404, detail="Brand not found")
     return {"brand_id": str(b.id), "series": trend_citations_per_day(db, tenant.id, b.id, days=days)}
+
+
+@router.get("/brands/{brand_id}/sov/multi-engine")
+def get_sov_multi_engine(
+    brand_id: UUID,
+    db: DbSession,
+    tenant: CurrentTenant,
+    range: str = Query("30d", alias="range"),
+):
+    """Share of voice by engine for the primary brand and each linked competitor (domain-matched citations)."""
+    b = db.get(Brand, brand_id)
+    if not b or b.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    days = parse_range_days(range)
+    out = multientity_sov_by_engine(db, tenant.id, brand_id, days)
+    if out.get("error") == "not_found":
+        raise HTTPException(status_code=404, detail="Brand not found")
+    return out
+
+
+@router.get("/brands/{brand_id}/sov/entity-weekly-trend")
+def get_sov_entity_weekly_trend(
+    brand_id: UUID,
+    db: DbSession,
+    tenant: CurrentTenant,
+    entity_id: UUID = Query(..., description="Primary brand id or a competitor brand id listed on the primary brand"),
+    weeks: int = Query(12, ge=4, le=52),
+):
+    """Weekly citation share for one entity (your brand or a competitor) across all engines on this brand's prompts."""
+    b = db.get(Brand, brand_id)
+    if not b or b.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    out = entity_weekly_share_trend(db, tenant.id, brand_id, entity_id, weeks=weeks)
+    err = out.get("error")
+    if err == "not_found":
+        raise HTTPException(status_code=404, detail="Brand not found")
+    if err in ("invalid_entity",):
+        raise HTTPException(status_code=400, detail="entity_id must be the primary brand or one of its competitors")
+    return out
 
 
 @router.get("/brands/{brand_id}/gaps", response_model=list[GapRead])

@@ -6,7 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { DASHBOARD_LAST_SCAN_STORAGE_KEY } from "@/lib/dashboardScanPreference";
 
-const links = [{ href: "/dashboard", label: "Dashboard" }];
+const links = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard/sov", label: "Share of voice" },
+];
 
 function useWorkspaceLogoHref() {
   const pathname = usePathname();
