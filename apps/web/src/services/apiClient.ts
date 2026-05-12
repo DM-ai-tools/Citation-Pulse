@@ -1,7 +1,14 @@
 let _warnedMisconfiguredApi = false;
 
 function base(): string {
-  const u = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const raw = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  // Strip trailing slash so fetch(`${base()}${path}`) never produces double-slash.
+  // Also ensure the value has a protocol — missing https:// would make fetch treat
+  // the whole string as a relative path, routing API calls through the frontend service.
+  let u = raw.replace(/\/+$/, "");
+  if (u && !u.startsWith("http://") && !u.startsWith("https://")) {
+    u = `https://${u}`;
+  }
   if (
     !_warnedMisconfiguredApi &&
     typeof window !== "undefined" &&
