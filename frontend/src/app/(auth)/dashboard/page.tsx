@@ -229,6 +229,8 @@ function DashboardShell(props: {
   mixTitle: string;
   mixFootnote: string;
   tableRows: CitationRow[];
+  /** Rendered after matrix / engine mix, before the citations URL table. */
+  beforeCitations?: ReactNode;
 }) {
   const barGradientId = useId().replace(/:/g, "");
   const columns = useMemo(() => {
@@ -392,6 +394,8 @@ function DashboardShell(props: {
         </section>
       </div>
 
+      {props.beforeCitations}
+
       <Card className="overflow-x-auto border-slate-100">
         <h2 className="text-lg font-semibold text-ink-900">Citations</h2>
         <p className="mt-1 text-sm text-slate-500">URLs surfaced from the matrix cells below.</p>
@@ -443,38 +447,38 @@ function ScanDashboard({ data, linkedFromLanding }: { data: ReportData; linkedFr
   const website = websiteFromScanReport(data);
 
   return (
-    <Fragment>
-      <DashboardShell
-        brandDisplayName={brandDisplayName}
-        website={website}
-        headerMeta={
-          <>
-            <p className="mt-1 font-mono text-xs text-slate-400">Scan {data.scan_id}</p>
-            {linkedFromLanding ? (
-              <p className="mt-2 text-xs text-slate-600">
-                SoV and KPIs match your citation report for the site you submitted on the landing page. Run a new scan
-                there anytime to refresh this workspace view.
-              </p>
-            ) : null}
-          </>
-        }
-        sovPct={sovPct}
-        sovFootnote="Same 30-day breakdown as the citation report for this scan."
-        citationTotal={totalCitationsInMatrix(cells)}
-        citationLabel="Citations (this scan)"
-        citationFootnote="Citation rows attached to this scan’s matrix cells."
-        prompts={data.prompts}
-        engines={engines}
-        cells={cells}
-        chartRows={chartRows}
-        mixTitle="Engine mix (this scan)"
-        mixFootnote="Citations captured per engine from the matrix above"
-        tableRows={tableRows}
-      />
-      <div className="mt-8 max-w-6xl">
-        <TopGapOpportunities opportunities={data.opportunities ?? []} />
-      </div>
-    </Fragment>
+    <DashboardShell
+      brandDisplayName={brandDisplayName}
+      website={website}
+      headerMeta={
+        <>
+          <p className="mt-1 font-mono text-xs text-slate-400">Scan {data.scan_id}</p>
+          {linkedFromLanding ? (
+            <p className="mt-2 text-xs text-slate-600">
+              SoV and KPIs match your citation report for the site you submitted on the landing page. Run a new scan
+              there anytime to refresh this workspace view.
+            </p>
+          ) : null}
+        </>
+      }
+      sovPct={sovPct}
+      sovFootnote="Same 30-day breakdown as the citation report for this scan."
+      citationTotal={totalCitationsInMatrix(cells)}
+      citationLabel="Citations (this scan)"
+      citationFootnote="Citation rows attached to this scan’s matrix cells."
+      prompts={data.prompts}
+      engines={engines}
+      cells={cells}
+      chartRows={chartRows}
+      mixTitle="Engine mix (this scan)"
+      mixFootnote="Citations captured per engine from the matrix above"
+      tableRows={tableRows}
+      beforeCitations={
+        <div className="max-w-6xl">
+          <TopGapOpportunities opportunities={data.opportunities ?? []} />
+        </div>
+      }
+    />
   );
 }
 
@@ -501,8 +505,8 @@ function BrandDashboard(props: {
           <div className="space-y-3">
             <div className="rounded-lg border border-amber-200/90 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
               <strong className="font-semibold">Workspace view:</strong> SoV and the matrix use this brand&apos;s
-              30‑day runs. <strong className="font-semibold">Top gap opportunities</strong> below load from the same
-              saved detection data as the API (<code className="rounded bg-white/80 px-1 font-mono text-[11px]">
+              30‑day runs. <strong className="font-semibold">Top gap opportunities</strong> (above the citations table)
+              load from the same saved detection data as the API (<code className="rounded bg-white/80 px-1 font-mono text-[11px]">
                 GET /brands/…/opportunities
               </code>
               ), not from a funnel scan id. Run a free scan from the home page to store a last scan in this browser, or
@@ -528,10 +532,12 @@ function BrandDashboard(props: {
         mixTitle="Engine mix (matrix)"
         mixFootnote="Citations captured per engine from the matrix above"
         tableRows={tableRows}
+        beforeCitations={
+          <div className="max-w-6xl">
+            <TopGapOpportunities opportunities={props.opportunities} />
+          </div>
+        }
       />
-      <div className="mt-8 max-w-6xl">
-        <TopGapOpportunities opportunities={props.opportunities} />
-      </div>
       <DeployFootnote />
     </Fragment>
   );
