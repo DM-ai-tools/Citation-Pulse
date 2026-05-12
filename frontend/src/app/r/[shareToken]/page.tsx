@@ -12,6 +12,7 @@ import { PublicCheckYourOwnCta } from "@/components/report/PublicCheckYourOwnCta
 import { PublicReportFooter } from "@/components/report/PublicReportFooter";
 import { PublicReportTopBar } from "@/components/report/PublicReportTopBar";
 import { ReportHero } from "@/components/report/ReportHero";
+import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
 import { Container } from "@/components/layout/Container";
 import { ErrorState, Skeleton } from "@/components/primitives";
 import { ShareBanner } from "@/components/shared/ShareBanner";
@@ -108,6 +109,8 @@ export default function PublicReportPage() {
         />
 
         <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
+
+        <TopGapOpportunities id="top-gap-opportunities" opportunities={d.opportunities ?? []} />
 
         <div className="grid gap-6 lg:grid-cols-12 lg:items-start">
           <div className="space-y-6 lg:col-span-7">

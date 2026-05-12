@@ -104,7 +104,7 @@ export default function ReportPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4FCF7]">
+    <div className="min-h-screen bg-[#F4FCF7]" data-citationpulse-web="apps-web">
       <ReportTopBar
         urlHost={urlHost}
         generatedAt={generatedAt}

@@ -7,6 +7,23 @@ export type GapItem = {
   grade: string;
 };
 
+/** Top Gap Opportunities row (from `opportunities` table via scan report payload). */
+export type OpportunityRow = {
+  id: string;
+  brand_id: string;
+  prompt_id: string;
+  title: string;
+  gap_type: string;
+  scope: string | null;
+  grade: string;
+  heat: string;
+  opportunity_score: number;
+  description: string;
+  est_volume: number | null;
+  status: string;
+  detected_at: string | null;
+};
+
 export type ReportData = ScanSnapshot & {
   gaps: GapItem[];
   breakdown: {
@@ -16,6 +33,8 @@ export type ReportData = ScanSnapshot & {
     neutral_share: number;
   } | null;
   competitors: { id: string; name: string; domains: string }[];
+  /** Graded gaps for this brand (open rows); empty until `detect_opportunities` has run. */
+  opportunities?: OpportunityRow[];
 };
 
 export type EngineScore = { engine: string; score: number };
