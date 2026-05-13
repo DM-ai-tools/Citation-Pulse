@@ -66,14 +66,15 @@ Set these in Railway (shared variables are fine):
 Set these at minimum on API:
 
 - `API_CORS_ORIGINS=https://<your-web-domain>`
+- `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` (optional) — Google Ads search-volume estimates for **Top gap opportunities** (read when building scan reports). If missing, **Est. monthly searches** stays as a dash. Not used on the Web service.
 
 Set these on Web:
 
 - `NEXT_PUBLIC_API_URL=https://<your-api-domain>` — **must be present when `npm run build` runs** (Docker/Railway build). Changing it requires a **Web service rebuild**, not only a restart, or the browser will still use the old inlined URL (often `localhost:8000`, which breaks production data like Top gap opportunities).
-- `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` (optional) — set on the **API** service only (not Web). They power Google Ads search-volume estimates for **Top gap opportunities** and are read when building scan reports. If they are missing or only set on Web, **Est. monthly searches** stays as a dash.
+- **Alternative (same-origin API):** `NEXT_PUBLIC_API_URL=same-origin` and set **`API_PROXY_TARGET=https://<your-api-domain>`** on the Web service at **build** time. The browser then calls `/api/v1/...` on the web host; Next.js rewrites proxy to FastAPI. Use this when you want one public origin or you keep seeing **404** on `multi-engine` because requests were accidentally hitting the web host instead of the API.
 - `NEXT_PUBLIC_APP_VERSION` (optional) — e.g. `RAILWAY_GIT_COMMIT_SHA` or a release tag, passed as a Docker build-arg so `/dashboard` can show **App build:** in the footer and you can confirm deploy revision in the browser.
 
-Anonymous funnel reports load **Share of voice** from fields embedded in `GET /api/v1/scans/{id}/report` (no Clerk token required). If production still shows “Share of voice block could not load”, the browser is usually calling the wrong API host: fix `NEXT_PUBLIC_API_URL`, **rebuild** the Web service, and redeploy the API so the report payload includes `sov_multi_engine` / `sov_multi_weekly_trend`.
+**Troubleshooting:** In DevTools → Network, if **`report`** is **200** but **`multi-engine`** / **`multi-weekly-trend`** are **404**, the URL your browser uses for `/api/v1/brands/...` is not your FastAPI app (wrong `NEXT_PUBLIC_API_URL`, or an **old API deploy** without those routes). Redeploy the **API** from current `main`, or switch to **same-origin + `API_PROXY_TARGET`**. Newer APIs also embed SoV inside the scan **report** JSON (`sov_multi_engine`, `sov_multi_weekly_trend`); after redeploying **API + Web**, the report page should stop calling those brand routes when embed is present.
 
 Optional but recommended:
 

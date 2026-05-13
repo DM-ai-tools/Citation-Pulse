@@ -92,6 +92,7 @@ export default function ReportPage() {
       return r.json();
     },
     enabled: fetchSovFromBrandsApi,
+    retry: false,
   });
   const sovWeekly = useQuery({
     queryKey: ["sov-multi-weekly", brandIdForSov],
@@ -102,6 +103,7 @@ export default function ReportPage() {
       return r.json();
     },
     enabled: fetchSovFromBrandsApi,
+    retry: false,
   });
 
   if (q.isLoading) {
@@ -207,7 +209,11 @@ export default function ReportPage() {
           <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
           {sovFetchError ? (
             <p className="mt-2 text-center text-xs text-amber-800">
-              Share of voice block could not load — heatmap filters below still work.
+              Share of voice block could not load — heatmap filters below still work. If DevTools shows{" "}
+              <span className="font-mono">404</span> on{" "}
+              <span className="font-mono">multi-engine</span>, point{" "}
+              <span className="font-mono">NEXT_PUBLIC_API_URL</span> at your FastAPI URL and rebuild Web, redeploy API, or use{" "}
+              <span className="font-mono">same-origin</span> + <span className="font-mono">API_PROXY_TARGET</span> (see Railway README).
             </p>
           ) : null}
         </div>
