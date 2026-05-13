@@ -5,7 +5,7 @@ import json
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -133,12 +133,6 @@ def _get_scan(db: Session, scan_id: UUID) -> Scan:
     return scan
 
 
-@router.get("/{scan_id}")
-def get_scan(scan_id: UUID, db: DbSession):
-    scan = _get_scan(db, scan_id)
-    return build_scan_snapshot(db, scan)
-
-
 @router.get("/{scan_id}/report")
 def get_scan_report(scan_id: UUID, db: DbSession):
     scan = _get_scan(db, scan_id)
@@ -149,6 +143,7 @@ def get_scan_report(scan_id: UUID, db: DbSession):
 def get_scan_sov_multi_engine(
     scan_id: UUID,
     db: DbSession,
+    response: Response,
     range: str = Query("30d", alias="range"),
 ):
     """Multi-entity SoV by engine for this scan's brand (public; same access model as ``/report``).
@@ -156,6 +151,7 @@ def get_scan_sov_multi_engine(
     Funnel report pages must not call ``GET /brands/.../sov/*`` (Clerk + tenant checks); use this
     route keyed by ``scan_id`` instead.
     """
+    response.headers["Cache-Control"] = "no-store"
     scan = _get_scan(db, scan_id)
     brand = db.get(Brand, scan.brand_id)
     if not brand:
@@ -168,9 +164,11 @@ def get_scan_sov_multi_engine(
 def get_scan_sov_multi_weekly_trend(
     scan_id: UUID,
     db: DbSession,
+    response: Response,
     weeks: int = Query(12, ge=4, le=52),
 ):
     """Weekly multi-entity SoV for this scan's brand (public; same access model as ``/report``)."""
+    response.headers["Cache-Control"] = "no-store"
     scan = _get_scan(db, scan_id)
     brand = db.get(Brand, scan.brand_id)
     if not brand:
@@ -260,3 +258,10 @@ async def stream_scan(scan_id: UUID, db: DbSession):
         media_type="text/event-stream",
         headers=dict(SSE_HEADERS),
     )
+
+
+@router.get("/{scan_id}")
+def get_scan(scan_id: UUID, db: DbSession):
+    """Scan snapshot — registered **after** all ``/{scan_id}/…`` routes so ``/sov/…`` paths are not shadowed."""
+    scan = _get_scan(db, scan_id)
+    return build_scan_snapshot(db, scan)

@@ -8,5 +8,8 @@ export function useReport(scanId: string) {
     queryKey: ["report", scanId],
     queryFn: () => getScanReport(scanId),
     enabled: !!scanId,
+    // After API deploy (new SoV embed / scan SoV routes), tab focus picks up fresh JSON without a full cache clear.
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 }

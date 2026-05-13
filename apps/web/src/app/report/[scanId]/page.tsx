@@ -34,6 +34,24 @@ function formatReportTimestamp(iso: string | null | undefined, fallbackMs: numbe
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+function isValidSovMultiPayload(v: unknown): v is SoVMultiEntityResponse {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    !("error" in v) &&
+    Array.isArray((v as { entities?: unknown }).entities)
+  );
+}
+
+function isValidSovWeeklyPayload(v: unknown): v is MultiWeeklyResponse {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    !("error" in v) &&
+    Array.isArray((v as { series?: unknown }).series)
+  );
+}
+
 export default function ReportPage() {
   const params = useParams<{ scanId: string }>();
   const scanId = params.scanId;
@@ -73,14 +91,7 @@ export default function ReportPage() {
   const brandIdForSov = q.data?.brand?.id ?? null;
   const embeddedMulti = q.data?.sov_multi_engine;
   const embeddedWeekly = q.data?.sov_multi_weekly_trend;
-  const hasEmbeddedSov = Boolean(
-    embeddedMulti &&
-      embeddedWeekly &&
-      typeof embeddedMulti === "object" &&
-      typeof embeddedWeekly === "object" &&
-      Array.isArray((embeddedMulti as { entities?: unknown }).entities) &&
-      Array.isArray((embeddedWeekly as { series?: unknown }).series),
-  );
+  const hasEmbeddedSov = isValidSovMultiPayload(embeddedMulti) && isValidSovWeeklyPayload(embeddedWeekly);
   const fetchSovFromPublicScanApi = Boolean(scanId && brandIdForSov && !hasEmbeddedSov);
 
   const sovMulti = useQuery({
