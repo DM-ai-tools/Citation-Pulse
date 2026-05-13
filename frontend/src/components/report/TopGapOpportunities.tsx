@@ -40,6 +40,66 @@ function formatMonthlySearches(v: number | null | undefined): string {
   return String(Math.round(v));
 }
 
+function OpportunitiesLegendFootnote() {
+  return (
+    <div className="border-t border-tr-line bg-tr-pale/35 px-[22px] py-4">
+      <p className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-navy">
+        How to read grades
+      </p>
+      <p className="mt-2 text-[12px] leading-relaxed text-tr-mute">
+        The <span className="font-semibold text-tr-navy">pill</span> on each row matches the tier. The{" "}
+        <span className="font-semibold text-tr-navy">letter</span> in the square (A, B, or C) is the same priority level
+        in short form. The model ranks from estimated monthly searches, how open the gap is across engines, competitor
+        citations there, and how long the gap has persisted without closing.
+      </p>
+      <ul className="mt-3 list-none space-y-2.5 pl-0 text-[12px] leading-relaxed text-tr-mute">
+        <li className="flex items-start gap-2.5 sm:gap-3">
+          <span
+            className={cn(
+              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
+              heatPillClass("A"),
+            )}
+          >
+            HOT · A
+          </span>
+          <span>
+            Highest urgency: strong search upside and/or a sharp gap (for example absent on several engines or heavy
+            competitor presence). Treat these prompts first in content and AI-visibility work.
+          </span>
+        </li>
+        <li className="flex items-start gap-2.5 sm:gap-3">
+          <span
+            className={cn(
+              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
+              heatPillClass("B"),
+            )}
+          >
+            WARM · B
+          </span>
+          <span>
+            Solid middle priority: meaningful demand or openness, but less extreme than A. Plan fixes on a near-term
+            roadmap after the HOT rows.
+          </span>
+        </li>
+        <li className="flex items-start gap-2.5 sm:gap-3">
+          <span
+            className={cn(
+              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
+              heatPillClass("C"),
+            )}
+          >
+            COOL · C
+          </span>
+          <span>
+            Lower relative impact in this scoring pass. Still worth tracking; pick up after HOT and WARM unless your
+            strategy targets these queries specifically.
+          </span>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 export function TopGapOpportunities({
   opportunities,
   className,
@@ -119,6 +179,7 @@ export function TopGapOpportunities({
           ))}
         </ul>
       )}
+      {rows.length > 0 ? <OpportunitiesLegendFootnote /> : null}
     </section>
   );
 }
