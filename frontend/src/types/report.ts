@@ -35,6 +35,9 @@ export type ReportData = ScanSnapshot & {
   competitors: { id: string; name: string; domains: string }[];
   /** Graded gaps for this brand (open rows); empty until `detect_opportunities` has run. */
   opportunities?: OpportunityRow[];
+  /** Embedded on scan report API — multi-entity SoV for funnel UIs (shape matches apps/web SoV types). */
+  sov_multi_engine?: unknown;
+  sov_multi_weekly_trend?: unknown;
 };
 
 export type EngineScore = { engine: string; score: number };

@@ -69,7 +69,20 @@ export default function ReportPage() {
     return formatReportTimestamp(q.data.completed_at, q.dataUpdatedAt);
   }, [q.data, q.dataUpdatedAt]);
 
+  /** Scan report embeds SoV so anonymous funnel users do not hit Clerk-protected ``/brands/.../sov`` routes. */
   const brandIdForSov = q.data?.brand?.id ?? null;
+  const embeddedMulti = q.data?.sov_multi_engine;
+  const embeddedWeekly = q.data?.sov_multi_weekly_trend;
+  const hasEmbeddedSov = Boolean(
+    embeddedMulti &&
+      embeddedWeekly &&
+      typeof embeddedMulti === "object" &&
+      typeof embeddedWeekly === "object" &&
+      Array.isArray((embeddedMulti as { entities?: unknown }).entities) &&
+      Array.isArray((embeddedWeekly as { series?: unknown }).series),
+  );
+  const fetchSovFromBrandsApi = !!brandIdForSov && !hasEmbeddedSov;
+
   const sovMulti = useQuery({
     queryKey: ["sov-multi-engine", brandIdForSov, "84d"],
     queryFn: async (): Promise<SoVMultiEntityResponse> => {
@@ -78,7 +91,7 @@ export default function ReportPage() {
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    enabled: !!brandIdForSov,
+    enabled: fetchSovFromBrandsApi,
   });
   const sovWeekly = useQuery({
     queryKey: ["sov-multi-weekly", brandIdForSov],
@@ -88,7 +101,7 @@ export default function ReportPage() {
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    enabled: !!brandIdForSov,
+    enabled: fetchSovFromBrandsApi,
   });
 
   if (q.isLoading) {
@@ -116,6 +129,24 @@ export default function ReportPage() {
 
   const d = q.data;
   const brandId = d.brand?.id ?? null;
+
+  const multiSov: SoVMultiEntityResponse | undefined = hasEmbeddedSov
+    ? (embeddedMulti as SoVMultiEntityResponse)
+    : sovMulti.isSuccess
+      ? sovMulti.data
+      : undefined;
+  const weeklySov: MultiWeeklyResponse | undefined = hasEmbeddedSov
+    ? (embeddedWeekly as MultiWeeklyResponse)
+    : sovWeekly.isSuccess
+      ? sovWeekly.data
+      : undefined;
+  const sovReady = Boolean(brandId && multiSov && weeklySov);
+  const sovPending = Boolean(
+    brandId && !sovReady && fetchSovFromBrandsApi && (sovMulti.isPending || sovWeekly.isPending),
+  );
+  const sovFetchError = Boolean(
+    brandId && fetchSovFromBrandsApi && (sovMulti.isError || sovWeekly.isError),
+  );
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const urlHost = d.submitted_url.replace(/^https?:\/\//, "").split("/")[0] ?? "";
@@ -155,26 +186,26 @@ export default function ReportPage() {
         />
       </div>
 
-      {brandId && sovMulti.isSuccess && sovWeekly.isSuccess ? (
+      {sovReady && multiSov && weeklySov ? (
         <div className="mx-auto max-w-[1280px] px-6 pt-7">
           <BrandSovDashboard
             variant="embedded"
             brandName={brandName}
-            multi={sovMulti.data}
-            weekly={sovWeekly.data}
+            multi={multiSov}
+            weekly={weeklySov}
             chipScores={scores}
             enginesOrder={engines}
             engineControl={{ value: layer, onChange: setLayer }}
           />
         </div>
-      ) : brandId && (sovMulti.isPending || sovWeekly.isPending) ? (
+      ) : sovPending ? (
         <div className="mx-auto max-w-[1280px] px-6 pt-7">
           <Skeleton className="h-[420px] w-full rounded-2xl" />
         </div>
       ) : (
         <div className="mx-auto max-w-[1280px] px-6 pt-7">
           <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
-          {brandId && (sovMulti.isError || sovWeekly.isError) ? (
+          {sovFetchError ? (
             <p className="mt-2 text-center text-xs text-amber-800">
               Share of voice block could not load — heatmap filters below still work.
             </p>

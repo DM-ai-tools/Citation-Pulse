@@ -412,8 +412,22 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
             if cb:
                 competitors.append({"id": str(cb.id), "name": cb.name, "domains": ",".join(cb.domains or [])})
 
+    # Multi-entity SoV for the report page: anonymous funnel users cannot call
+    # ``GET /api/v1/brands/{id}/sov/*`` (Clerk-protected), so embed the same payload here.
+    sov_multi_engine: dict[str, object] | None = None
+    sov_multi_weekly_trend: dict[str, object] | None = None
+    if brand:
+        from citationpulse.services.sov_entities import (
+            multi_entity_weekly_share_trend,
+            multientity_sov_by_engine,
+        )
+
+        sov_multi_engine = multientity_sov_by_engine(db, brand.tenant_id, brand.id, days=84)
+        sov_multi_weekly_trend = multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=12)
+
     opportunities: list[dict[str, object]] = []
     if brand:
+        from citationpulse.services.dataforseo_keywords import dataforseo_configured
         from citationpulse.services.opportunities import (
             detect_opportunities_for_brand,
             heat_from_grade,
@@ -421,7 +435,11 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
         )
 
         rows = list_opportunities_for_brand(db, brand.id, status="open")
-        if not rows and scan.status == "completed":
+        missing_volume = bool(rows) and any(o.est_volume is None for o in rows)
+        should_refresh = scan.status == "completed" and (
+            not rows or (missing_volume and dataforseo_configured())
+        )
+        if should_refresh:
             try:
                 from citationpulse.services.opportunities import sync_prompt_volumes_for_brand
 
@@ -462,5 +480,7 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
         "gaps": gaps[:50],
         "breakdown": breakdown,
         "competitors": competitors,
+        "sov_multi_engine": sov_multi_engine,
+        "sov_multi_weekly_trend": sov_multi_weekly_trend,
         "opportunities": opportunities,
     }

@@ -70,7 +70,10 @@ Set these at minimum on API:
 Set these on Web:
 
 - `NEXT_PUBLIC_API_URL=https://<your-api-domain>` — **must be present when `npm run build` runs** (Docker/Railway build). Changing it requires a **Web service rebuild**, not only a restart, or the browser will still use the old inlined URL (often `localhost:8000`, which breaks production data like Top gap opportunities).
+- `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` (optional) — set on the **API** service only (not Web). They power Google Ads search-volume estimates for **Top gap opportunities** and are read when building scan reports. If they are missing or only set on Web, **Est. monthly searches** stays as a dash.
 - `NEXT_PUBLIC_APP_VERSION` (optional) — e.g. `RAILWAY_GIT_COMMIT_SHA` or a release tag, passed as a Docker build-arg so `/dashboard` can show **App build:** in the footer and you can confirm deploy revision in the browser.
+
+Anonymous funnel reports load **Share of voice** from fields embedded in `GET /api/v1/scans/{id}/report` (no Clerk token required). If production still shows “Share of voice block could not load”, the browser is usually calling the wrong API host: fix `NEXT_PUBLIC_API_URL`, **rebuild** the Web service, and redeploy the API so the report payload includes `sov_multi_engine` / `sov_multi_weekly_trend`.
 
 Optional but recommended:
 

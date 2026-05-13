@@ -1,3 +1,4 @@
+import type { MultiWeeklyResponse, SoVMultiEntityResponse } from "@/components/sov/BrandSovDashboard";
 import type { ScanSnapshot } from "./scan";
 
 export type GapItem = {
@@ -35,6 +36,9 @@ export type ReportData = ScanSnapshot & {
   competitors: { id: string; name: string; domains: string }[];
   /** Graded gaps for this brand (open rows); empty until `detect_opportunities` has run. */
   opportunities?: OpportunityRow[];
+  /** Embedded on ``GET /scans/{id}/report`` so anonymous funnel pages do not call Clerk-protected ``/brands/.../sov``. */
+  sov_multi_engine?: SoVMultiEntityResponse | null;
+  sov_multi_weekly_trend?: MultiWeeklyResponse | null;
 };
 
 export type EngineScore = { engine: string; score: number };
