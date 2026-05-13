@@ -29,6 +29,23 @@ from citationpulse.models.domain import (
 
 _log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Locale → DataForSEO location_code mapping (sync_prompt_volumes_for_brand)
+# Full list: https://docs.dataforseo.com/v3/keywords_data/google_ads/locations/
+# ---------------------------------------------------------------------------
+_LOCALE_TO_LOCATION: dict[str, int] = {
+    "en-us": 2840,  # United States
+    "en-au": 2036,  # Australia
+    "en-gb": 2826,  # United Kingdom
+    "en-ca": 2124,  # Canada
+    "en-nz": 2554,  # New Zealand
+    "en-sg": 2702,  # Singapore
+    "en-in": 2356,  # India
+    "en-za": 2710,  # South Africa
+    "en-ie": 2372,  # Ireland
+}
+_DEFAULT_LOCATION_CODE = 2840  # US fallback
+
 # Classifier states (dev doc naming)
 MISSING = "MISSING"
 COMPETITOR_ONLY = "COMPETITOR_ONLY"
@@ -306,7 +323,8 @@ def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
         return " ".join(cleaned.split())
 
     for locale, locale_prompts in by_locale.items():
-        loc_lower = locale.lower()
+        # Normalise "en_AU" / "EN-au" → "en-au" for lookup
+        loc_lower = locale.lower().replace("_", "-")
         location_code = _LOCALE_TO_LOCATION.get(loc_lower, _DEFAULT_LOCATION_CODE)
         language_code = loc_lower.split("-")[0] or "en"
 
