@@ -35,7 +35,11 @@ from citationpulse.services.opportunities import heat_from_grade, list_opportuni
 from citationpulse.services.rate_limit import allow_ad_hoc_run
 from citationpulse.services.scorer import trend_citations_per_day
 from citationpulse.services.sov import compute_sov
-from citationpulse.services.sov_entities import entity_weekly_share_trend, multientity_sov_by_engine
+from citationpulse.services.sov_entities import (
+    entity_weekly_share_trend,
+    multi_entity_weekly_share_trend,
+    multientity_sov_by_engine,
+)
 
 router = APIRouter(dependencies=[Depends(get_auth_context)])
 
@@ -246,6 +250,23 @@ def get_sov_entity_weekly_trend(
         raise HTTPException(status_code=404, detail="Brand not found")
     if err in ("invalid_entity",):
         raise HTTPException(status_code=400, detail="entity_id must be the primary brand or one of its competitors")
+    return out
+
+
+@router.get("/brands/{brand_id}/sov/multi-weekly-trend")
+def get_sov_multi_weekly_trend(
+    brand_id: UUID,
+    db: DbSession,
+    tenant: CurrentTenant,
+    weeks: int = Query(12, ge=4, le=52),
+):
+    """Weekly SoV lines for the primary brand and each linked competitor (tracked citations only)."""
+    b = db.get(Brand, brand_id)
+    if not b or b.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    out = multi_entity_weekly_share_trend(db, tenant.id, brand_id, weeks=weeks)
+    if out.get("error") == "not_found":
+        raise HTTPException(status_code=404, detail="Brand not found")
     return out
 
 

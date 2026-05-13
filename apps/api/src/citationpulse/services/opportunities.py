@@ -27,6 +27,23 @@ from citationpulse.models.domain import (
     default_engines,
 )
 
+# ---------------------------------------------------------------------------
+# Locale → DataForSEO location_code mapping
+# Full list: https://docs.dataforseo.com/v3/keywords_data/google_ads/locations/
+# ---------------------------------------------------------------------------
+_LOCALE_TO_LOCATION: dict[str, int] = {
+    "en-us": 2840,  # United States
+    "en-au": 2036,  # Australia
+    "en-gb": 2826,  # United Kingdom
+    "en-ca": 2124,  # Canada
+    "en-nz": 2554,  # New Zealand
+    "en-sg": 2702,  # Singapore
+    "en-in": 2356,  # India
+    "en-za": 2710,  # South Africa
+    "en-ie": 2372,  # Ireland
+}
+_DEFAULT_LOCATION_CODE = 2840  # US fallback
+
 _log = logging.getLogger(__name__)
 
 # Classifier states (dev doc naming)
@@ -349,6 +366,103 @@ def resolve_stale_for_prompt(
         if row.gap_type == active_gap_type and row.scope == active_scope_norm:
             continue
         row.status = "resolved"
+
+
+def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
+    """Fetch DataForSEO Google Ads monthly search volumes for all brand prompts.
+
+    Groups prompts by locale, calls DataForSEO once per locale group, and upserts
+    the avg ``search_volume`` into ``prompt_metrics``.  Silently skips if DataForSEO
+    is not configured or returns no data — the opportunity scorer falls back to
+    ``est_volume=None`` which still produces valid (lower) scores.
+
+    Returns the number of prompts whose volume was updated.
+    """
+    from citationpulse.services.dataforseo_keywords import (
+        DataForSEOError,
+        dataforseo_configured,
+        fetch_google_ads_search_volumes,
+    )
+
+    if not dataforseo_configured():
+        _log.debug("sync_prompt_volumes: DataForSEO not configured, skipping")
+        return 0
+
+    prompts = list(
+        db.scalars(select(Prompt).where(Prompt.brand_id == brand_id, Prompt.enabled.is_(True))).all()
+    )
+    if not prompts:
+        return 0
+
+    # Group by locale so we make one DataForSEO call per geo.
+    by_locale: dict[str, list[Prompt]] = defaultdict(list)
+    for p in prompts:
+        by_locale[(p.locale or "en-US").strip()].append(p)
+
+    updated = 0
+    now = datetime.now(timezone.utc)
+
+    for locale, locale_prompts in by_locale.items():
+        loc_lower = locale.lower()
+        location_code = _LOCALE_TO_LOCATION.get(loc_lower, _DEFAULT_LOCATION_CODE)
+        # language_code: first segment of locale (en-AU → en)
+        language_code = loc_lower.split("-")[0] or "en"
+
+        # DataForSEO rejects question marks and certain punctuation — strip them.
+        # Also collapse extra whitespace after removal.
+        def _clean_keyword(text: str) -> str:
+            import re
+            cleaned = re.sub(r"[?!;:\"'()[\]{}<>@#$%^&*\\|~`]", " ", text[:700])
+            return " ".join(cleaned.split())
+
+        keywords = [_clean_keyword(p.text) for p in locale_prompts]
+        try:
+            rows = fetch_google_ads_search_volumes(
+                keywords,
+                location_code=location_code,
+                language_code=language_code,
+            )
+        except DataForSEOError as exc:
+            _log.warning(
+                "sync_prompt_volumes DataForSEO error brand_id=%s locale=%s: %s",
+                brand_id,
+                locale,
+                exc,
+            )
+            continue
+
+        # Build keyword → volume lookup (case-insensitive)
+        vol_map: dict[str, int] = {}
+        for row in rows:
+            kw = (row.get("keyword") or "").strip().lower()
+            sv = row.get("search_volume")
+            if kw and isinstance(sv, (int, float)) and sv >= 0:
+                vol_map[kw] = int(sv)
+
+        for p in locale_prompts:
+            kw_key = _clean_keyword(p.text).lower()
+            volume = vol_map.get(kw_key)
+            if volume is None:
+                # Fuzzy: try trimmed keyword
+                for k, v in vol_map.items():
+                    if kw_key.startswith(k[:40]) or k.startswith(kw_key[:40]):
+                        volume = v
+                        break
+            if volume is None:
+                continue
+            existing = db.get(PromptMetrics, p.id)
+            if existing:
+                existing.est_volume = volume
+                existing.updated_at = now
+            else:
+                db.add(PromptMetrics(prompt_id=p.id, est_volume=volume, updated_at=now))
+            updated += 1
+
+    if updated:
+        db.commit()
+        _log.info("sync_prompt_volumes brand_id=%s updated=%d prompts", brand_id, updated)
+
+    return updated
 
 
 def detect_opportunities_for_brand(

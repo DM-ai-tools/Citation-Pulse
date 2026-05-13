@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CitationHeatmap } from "@/components/report/CitationHeatmap";
 import { CitationsList } from "@/components/report/CitationsList";
@@ -13,8 +14,14 @@ import { PromptEngineScoreMatrix } from "@/components/report/PromptEngineScoreMa
 import { ReportHero } from "@/components/report/ReportHero";
 import { ReportTopBar } from "@/components/report/ReportTopBar";
 import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
+import {
+  BrandSovDashboard,
+  type MultiWeeklyResponse,
+  type SoVMultiEntityResponse,
+} from "@/components/sov/BrandSovDashboard";
 import { ErrorState, Skeleton } from "@/components/primitives";
 import { useReport } from "@/hooks/useReport";
+import { apiFetch } from "@/lib/api";
 import { rememberDashboardScan } from "@/lib/dashboardScanPreference";
 import { engineLayerScores, overallCitationScore } from "@/lib/matrixStats";
 import { engineTitle } from "@/lib/engineDisplay";
@@ -62,6 +69,28 @@ export default function ReportPage() {
     return formatReportTimestamp(q.data.completed_at, q.dataUpdatedAt);
   }, [q.data, q.dataUpdatedAt]);
 
+  const brandIdForSov = q.data?.brand?.id ?? null;
+  const sovMulti = useQuery({
+    queryKey: ["sov-multi-engine", brandIdForSov, "84d"],
+    queryFn: async (): Promise<SoVMultiEntityResponse> => {
+      const id = brandIdForSov as string;
+      const r = await apiFetch(`/api/v1/brands/${encodeURIComponent(id)}/sov/multi-engine?range=84d`);
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    enabled: !!brandIdForSov,
+  });
+  const sovWeekly = useQuery({
+    queryKey: ["sov-multi-weekly", brandIdForSov],
+    queryFn: async (): Promise<MultiWeeklyResponse> => {
+      const id = brandIdForSov as string;
+      const r = await apiFetch(`/api/v1/brands/${encodeURIComponent(id)}/sov/multi-weekly-trend?weeks=12`);
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    enabled: !!brandIdForSov,
+  });
+
   if (q.isLoading) {
     return (
       <div className="min-h-screen bg-[#F4FCF7]">
@@ -86,6 +115,8 @@ export default function ReportPage() {
   }
 
   const d = q.data;
+  const brandId = d.brand?.id ?? null;
+
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const urlHost = d.submitted_url.replace(/^https?:\/\//, "").split("/")[0] ?? "";
   const brandName = d.brand?.name ?? urlHost;
@@ -124,9 +155,32 @@ export default function ReportPage() {
         />
       </div>
 
-      <div className="mx-auto max-w-[1280px] px-6 pt-7">
-        <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
-      </div>
+      {brandId && sovMulti.isSuccess && sovWeekly.isSuccess ? (
+        <div className="mx-auto max-w-[1280px] px-6 pt-7">
+          <BrandSovDashboard
+            variant="embedded"
+            brandName={brandName}
+            multi={sovMulti.data}
+            weekly={sovWeekly.data}
+            chipScores={scores}
+            enginesOrder={engines}
+            engineControl={{ value: layer, onChange: setLayer }}
+          />
+        </div>
+      ) : brandId && (sovMulti.isPending || sovWeekly.isPending) ? (
+        <div className="mx-auto max-w-[1280px] px-6 pt-7">
+          <Skeleton className="h-[420px] w-full rounded-2xl" />
+        </div>
+      ) : (
+        <div className="mx-auto max-w-[1280px] px-6 pt-7">
+          <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
+          {brandId && (sovMulti.isError || sovWeekly.isError) ? (
+            <p className="mt-2 text-center text-xs text-amber-800">
+              Share of voice block could not load — heatmap filters below still work.
+            </p>
+          ) : null}
+        </div>
+      )}
 
       {/* Full-width above the heatmap so Top gap opportunities matches /dashboard prominence and is not lost below the fold (prod users often scroll straight to citations). */}
       <div className="mx-auto max-w-[1280px] px-6 pt-5">
@@ -134,7 +188,7 @@ export default function ReportPage() {
       </div>
 
       <div className="mx-auto grid max-w-[1280px] gap-6 px-6 py-6 pb-8 lg:grid-cols-[1.4fr_1fr] lg:items-start">
-        <div className="flex flex-col gap-5">
+        <div className="flex min-w-0 w-full flex-col gap-5 lg:col-span-1">
           <CitationHeatmap
             prompts={d.prompts}
             engines={engines}
@@ -152,15 +206,18 @@ export default function ReportPage() {
             engineCount={d.engines.length}
             citationScore={layerScore}
           />
+        </div>
+        <div className="flex min-w-0 w-full flex-col gap-5 lg:col-span-1">
+          <PromptEngineScoreMatrix prompts={d.prompts} engines={d.engines} cells={d.matrix.cells} />
+          <DfyCta />
+        </div>
+        <div className="min-w-0 w-full lg:col-span-2">
           <CitationsList
             cells={allCells}
             engineFilter={layer}
+            engines={d.engines}
             title={layer ? `Citations from ${engineTitle(layer)}` : "Citations Found"}
           />
-        </div>
-        <div className="flex flex-col gap-5">
-          <PromptEngineScoreMatrix prompts={d.prompts} engines={d.engines} cells={d.matrix.cells} />
-          <DfyCta />
         </div>
       </div>
 

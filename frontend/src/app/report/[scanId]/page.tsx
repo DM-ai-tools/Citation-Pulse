@@ -133,7 +133,7 @@ export default function ReportPage() {
       </div>
 
       <div className="mx-auto grid max-w-[1280px] gap-6 px-6 py-6 pb-8 lg:grid-cols-[1.4fr_1fr] lg:items-start">
-        <div className="flex flex-col gap-5">
+        <div className="flex min-w-0 w-full flex-col gap-5 lg:col-span-1">
           <CitationHeatmap
             prompts={d.prompts}
             engines={engines}
@@ -151,15 +151,18 @@ export default function ReportPage() {
             engineCount={d.engines.length}
             citationScore={layerScore}
           />
+        </div>
+        <div className="flex min-w-0 w-full flex-col gap-5 lg:col-span-1">
+          <PromptEngineScoreMatrix prompts={d.prompts} engines={d.engines} cells={d.matrix.cells} />
+          <DfyCta />
+        </div>
+        <div className="min-w-0 w-full lg:col-span-2">
           <CitationsList
             cells={allCells}
             engineFilter={layer}
+            engines={d.engines}
             title={layer ? `Citations from ${engineTitle(layer)}` : "Citations Found"}
           />
-        </div>
-        <div className="flex flex-col gap-5">
-          <PromptEngineScoreMatrix prompts={d.prompts} engines={d.engines} cells={d.matrix.cells} />
-          <DfyCta />
         </div>
       </div>
 

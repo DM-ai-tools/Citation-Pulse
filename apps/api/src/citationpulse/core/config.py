@@ -133,6 +133,21 @@ class Settings(BaseSettings):
     # Public API (Phase 3) — optional HMAC
     public_api_hmac_secret: str = ""
 
+    # --- DataForSEO (optional) — Google Ads monthly search volumes by geo ---
+    # https://docs.dataforseo.com/v3/keywords_data/google_ads/search_volume/live/
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+
+    @field_validator("dataforseo_password", "dataforseo_login", mode="before")
+    @classmethod
+    def normalise_dataforseo_secrets(cls, v: object) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+            s = s[1:-1].strip()
+        return s
+
 
 @lru_cache
 def get_settings() -> Settings:

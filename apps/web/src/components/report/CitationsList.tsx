@@ -39,10 +39,13 @@ function hostFor(url: string): string {
 export function CitationsList({
   cells,
   engineFilter,
+  engines,
   title = "Citations Found",
 }: {
   cells: MatrixCell[];
   engineFilter?: string | null;
+  /** When set (e.g. scan engines), citation groups follow this order so the 2×2 grid matches the heatmap. */
+  engines?: string[];
   title?: string;
 }) {
   const groups = useMemo<Group[]>(() => {
@@ -71,7 +74,7 @@ export function CitationsList({
     }
     // Dedupe by URL within each engine, keep best ownership rank.
     const rank: Record<string, number> = { brand: 0, competitor: 1, neutral: 2 };
-    return [...byEngine.values()].map((g) => {
+    const deduped = [...byEngine.values()].map((g) => {
       const seen = new Map<string, CellCitation>();
       for (const c of g.citations) {
         const prev = seen.get(c.url);
@@ -82,13 +85,18 @@ export function CitationsList({
       g.citations = [...seen.values()];
       return g;
     });
-  }, [cells, engineFilter]);
+    if (!engines?.length) return deduped;
+    const order = new Map(engines.map((e, i) => [e, i]));
+    return [...deduped].sort((a, b) => (order.get(a.engine) ?? 999) - (order.get(b.engine) ?? 999));
+  }, [cells, engineFilter, engines]);
 
   const totalUrls = groups.reduce((acc, g) => acc + g.citations.length, 0);
+  /** Two equal-width columns (2×2 for four engines) when showing every engine; flex parents need `min-w-0` upstream. */
+  const useEngineGrid = !engineFilter && groups.length > 1;
 
   if (totalUrls === 0) {
     return (
-      <div className="overflow-hidden rounded-[18px] border border-tr-line bg-white shadow-[0_8px_30px_rgba(10,37,64,0.06)]">
+      <div className="w-full min-w-0 max-w-none self-stretch overflow-hidden rounded-[18px] border border-tr-line bg-white shadow-[0_8px_30px_rgba(10,37,64,0.06)]">
         <div className="flex items-center justify-between border-b border-tr-line px-[22px] py-[18px]">
           <h3 className="font-display text-sm font-extrabold uppercase tracking-wide text-tr-navy">
             {title}
@@ -102,7 +110,7 @@ export function CitationsList({
   }
 
   return (
-    <div className="overflow-hidden rounded-[18px] border border-tr-line bg-white shadow-[0_8px_30px_rgba(10,37,64,0.06)]">
+    <div className="w-full min-w-0 max-w-none self-stretch overflow-hidden rounded-[18px] border border-tr-line bg-white shadow-[0_8px_30px_rgba(10,37,64,0.06)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-tr-line px-[22px] py-[18px]">
         <h3 className="font-display text-sm font-extrabold uppercase tracking-wide text-tr-navy">
           {title}
@@ -114,9 +122,22 @@ export function CitationsList({
         </p>
       </div>
 
-      <div className="divide-y divide-tr-line">
+      <div
+        className={cn(
+          useEngineGrid
+            ? "grid w-full min-w-0 max-w-none grid-cols-2 grid-flow-row items-stretch gap-x-4 gap-y-3 p-[18px] max-[440px]:grid-cols-1 sm:p-5"
+            : "divide-y divide-tr-line",
+        )}
+      >
         {groups.map((g) => (
-          <section key={g.engine} className="px-[22px] py-4">
+          <section
+            key={g.engine}
+            className={cn(
+              useEngineGrid
+                ? "min-w-0 w-full max-w-full rounded-xl border border-tr-line bg-tr-pale/25 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]"
+                : "px-[22px] py-4",
+            )}
+          >
             <header className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
               <h4 className="font-display text-sm font-bold text-tr-navy">{engineTitle(g.engine)}</h4>
               <p className="text-[11px] uppercase tracking-wide text-tr-mute">

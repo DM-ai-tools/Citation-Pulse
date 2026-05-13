@@ -354,16 +354,19 @@ def daily_beat() -> str:
 @celery_app.task(name="citationpulse.detect_opportunities")
 def detect_opportunities_task(brand_id: str | None = None) -> str:
     """Nightly (or on-demand): classify gaps, score, upsert `opportunities` rows per brand."""
-    from citationpulse.services.opportunities import detect_opportunities_for_brand
+    from citationpulse.services.opportunities import detect_opportunities_for_brand, sync_prompt_volumes_for_brand
 
     db = SessionLocal()
     try:
         if brand_id:
+            sync_prompt_volumes_for_brand(db, UUID(brand_id))
             detect_opportunities_for_brand(db, UUID(brand_id))
             return "ok"
         brands = list(db.query(Brand).all())
         for b in brands:
+            sync_prompt_volumes_for_brand(db, b.id)
             detect_opportunities_for_brand(db, b.id)
         return f"ok:{len(brands)}"
     finally:
         db.close()
+

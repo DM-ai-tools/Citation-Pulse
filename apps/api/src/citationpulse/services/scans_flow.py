@@ -175,8 +175,13 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
     engines_ov = list(scan.engines) if scan.engines else None
     if was_new and brand_id_for_detect:
         try:
-            from citationpulse.services.opportunities import detect_opportunities_for_brand
+            from citationpulse.services.opportunities import (
+                detect_opportunities_for_brand,
+                sync_prompt_volumes_for_brand,
+            )
 
+            # Fetch DataForSEO keyword volumes before scoring so est_volume is populated.
+            sync_prompt_volumes_for_brand(db, brand_id_for_detect)
             detect_opportunities_for_brand(db, brand_id_for_detect, engines_override=engines_ov)
         except Exception:
             _log.exception(
@@ -191,9 +196,11 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
             from citationpulse.services.opportunities import (
                 detect_opportunities_for_brand,
                 list_opportunities_for_brand,
+                sync_prompt_volumes_for_brand,
             )
 
             if not list_opportunities_for_brand(db, brand_id_for_detect, status="open"):
+                sync_prompt_volumes_for_brand(db, brand_id_for_detect)
                 detect_opportunities_for_brand(db, brand_id_for_detect, engines_override=engines_ov)
         except Exception:
             _log.exception(
@@ -416,7 +423,10 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
         rows = list_opportunities_for_brand(db, brand.id, status="open")
         if not rows and scan.status == "completed":
             try:
+                from citationpulse.services.opportunities import sync_prompt_volumes_for_brand
+
                 eng_ov = list(scan.engines) if scan.engines else None
+                sync_prompt_volumes_for_brand(db, brand.id)
                 detect_opportunities_for_brand(db, brand.id, engines_override=eng_ov)
                 rows = list_opportunities_for_brand(db, brand.id, status="open")
             except Exception:

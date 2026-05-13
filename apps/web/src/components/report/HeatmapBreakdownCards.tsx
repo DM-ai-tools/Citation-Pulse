@@ -37,7 +37,7 @@ export function HeatmapBreakdownCards({
       smallClass: "text-[#14653e]",
     },
     {
-      label: "COMPETITOR ONLY",
+      label: "COMPETITOR CITED",
       sub: `${pct(comp)}%`,
       val: comp,
       wrap: "bg-tr-landingOrange text-white",
