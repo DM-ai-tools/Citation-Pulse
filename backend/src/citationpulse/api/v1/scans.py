@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,24 +13,34 @@ from sqlalchemy.orm import Session
 from citationpulse.api.deps import DbSession
 from citationpulse.core.config import get_settings
 from citationpulse.db.session import SessionLocal
-from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent
+from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent, all_engines
 from citationpulse.schemas.scans import ScanCreate, ScanCreateResponse, ShareBody
+from citationpulse.services.brand_dashboard import parse_range_days
 from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
-from citationpulse.services.rate_limit import allow_anonymous_scan
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
+from citationpulse.services.rate_limit import allow_anonymous_scan
 from citationpulse.services.scans_flow import (
     available_engines,
     build_scan_report,
     build_scan_snapshot,
     get_or_create_anonymous_tenant,
 )
+from citationpulse.services.sov_entities import (
+    multi_entity_weekly_share_trend,
+    multientity_sov_by_engine,
+)
 from citationpulse.tasks.geo import fan_out_scan_task
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+_log = logging.getLogger(__name__)
 
 
 def _enqueue_fan_out_scan(scan_id: str) -> None:
-    fan_out_scan_task.delay(scan_id)
+    try:
+        fan_out_scan_task.delay(scan_id)
+    except Exception:
+        _log.exception("fan_out_scan failed scan_id=%s", scan_id)
+
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -120,16 +131,135 @@ def _get_scan(db: Session, scan_id: UUID) -> Scan:
     return scan
 
 
-@router.get("/{scan_id}")
-def get_scan(scan_id: UUID, db: DbSession):
-    scan = _get_scan(db, scan_id)
-    return build_scan_snapshot(db, scan)
+def _empty_multi_from_brand(db: Session, brand: Brand, tenant_id: UUID, days: int) -> dict[str, object]:
+    """Valid SoV multi payload when the real query fails so the funnel report can still render."""
+    primary = brand
+    competitors: dict[UUID, Brand] = {}
+    for cid in primary.competitors or []:
+        c = db.get(Brand, cid)
+        if c and c.tenant_id == tenant_id:
+            competitors[cid] = c
+    engines = all_engines()
+    zero_shares = {e: 0.0 for e in engines}
+    entity_rows: list[dict[str, object]] = [
+        {"entity_id": str(primary.id), "name": primary.name, "role": "brand", "shares_by_engine": dict(zero_shares)},
+    ]
+    for cid, comp in competitors.items():
+        entity_rows.append(
+            {"entity_id": str(cid), "name": comp.name, "role": "competitor", "shares_by_engine": dict(zero_shares)},
+        )
+    return {
+        "primary_brand_id": str(primary.id),
+        "range_days": days,
+        "engines": engines,
+        "entities": entity_rows,
+        "totals": {"brand_citations": 0, "competitor_citations": 0},
+    }
+
+
+def _empty_weekly_from_multi(multi: dict[str, object], weeks: int) -> dict[str, object]:
+    ents_raw = multi.get("entities") or []
+    entities_meta: list[dict[str, str]] = []
+    for e in ents_raw:
+        if not isinstance(e, dict) or "entity_id" not in e:
+            continue
+        entities_meta.append(
+            {
+                "entity_id": str(e["entity_id"]),
+                "name": str(e.get("name", "")),
+                "role": str(e.get("role", "other")),
+            }
+        )
+    primary_id = str(multi.get("primary_brand_id") or (entities_meta[0]["entity_id"] if entities_meta else ""))
+    return {"primary_brand_id": primary_id, "weeks": weeks, "entities": entities_meta, "series": []}
+
+
+# NOTE: keep all specific `/{scan_id}/...` routes BEFORE the generic `/{scan_id}` snapshot
+# route below; otherwise FastAPI matches the generic one first and returns a Scan snapshot
+# (or 404 if scan_id was misread) for the SoV paths.
 
 
 @router.get("/{scan_id}/report")
 def get_scan_report(scan_id: UUID, db: DbSession):
     scan = _get_scan(db, scan_id)
     return build_scan_report(db, scan)
+
+
+@router.get("/{scan_id}/sov/multi-engine")
+def get_scan_sov_multi_engine(
+    scan_id: UUID,
+    db: DbSession,
+    response: Response,
+    range: str = Query("30d", alias="range"),
+):
+    """Multi-entity SoV by engine for this scan's brand (public; same access as ``/report``)."""
+    response.headers["Cache-Control"] = "no-store"
+    scan = _get_scan(db, scan_id)
+    brand = db.get(Brand, scan.brand_id)
+    if not brand:
+        raise HTTPException(status_code=404, detail="Scan has no brand")
+    days = parse_range_days(range)
+    return multientity_sov_by_engine(db, brand.tenant_id, brand.id, days)
+
+
+@router.get("/{scan_id}/sov/multi-weekly-trend")
+def get_scan_sov_multi_weekly_trend(
+    scan_id: UUID,
+    db: DbSession,
+    response: Response,
+    weeks: int = Query(12, ge=4, le=52),
+):
+    """Weekly multi-entity SoV for this scan's brand (public; same access as ``/report``)."""
+    response.headers["Cache-Control"] = "no-store"
+    scan = _get_scan(db, scan_id)
+    brand = db.get(Brand, scan.brand_id)
+    if not brand:
+        raise HTTPException(status_code=404, detail="Scan has no brand")
+    return multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=weeks)
+
+
+@router.get("/{scan_id}/sov/summary")
+def get_scan_sov_summary(
+    scan_id: UUID,
+    db: DbSession,
+    response: Response,
+    range: str = Query("84d", alias="range"),
+    weeks: int = Query(12, ge=4, le=52),
+):
+    """Return multi-engine + weekly SoV in one response (public; same access as ``/report``).
+
+    Funnel report pages use this instead of two parallel fetches so a single failing leg
+    does not surface as a hard error when the other succeeds. Each side is wrapped so a
+    failure on one returns an empty-but-valid payload rather than a 500.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    scan = _get_scan(db, scan_id)
+    brand = db.get(Brand, scan.brand_id)
+    if not brand:
+        raise HTTPException(status_code=404, detail="Scan has no brand")
+    days = parse_range_days(range)
+
+    try:
+        cand = multientity_sov_by_engine(db, brand.tenant_id, brand.id, days)
+        if isinstance(cand, dict) and cand.get("error"):
+            multi = _empty_multi_from_brand(db, brand, brand.tenant_id, days)
+        else:
+            multi = cand
+    except Exception:
+        _log.exception("multientity_sov_by_engine failed scan_id=%s", scan_id)
+        multi = _empty_multi_from_brand(db, brand, brand.tenant_id, days)
+
+    try:
+        cand_w = multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=weeks)
+        if isinstance(cand_w, dict) and cand_w.get("error"):
+            weekly = _empty_weekly_from_multi(multi, weeks)
+        else:
+            weekly = cand_w
+    except Exception:
+        _log.exception("multi_entity_weekly_share_trend failed scan_id=%s", scan_id)
+        weekly = _empty_weekly_from_multi(multi, weeks)
+
+    return {"multi_engine": multi, "multi_weekly_trend": weekly}
 
 
 @router.post("/{scan_id}/share")
@@ -214,3 +344,12 @@ async def stream_scan(scan_id: UUID, db: DbSession):
         media_type="text/event-stream",
         headers=dict(SSE_HEADERS),
     )
+
+
+# IMPORTANT: this generic snapshot route must stay at the BOTTOM of this module so
+# that `/{scan_id}/report`, `/{scan_id}/sov/*`, `/{scan_id}/stream`, etc. are all
+# registered first and matched before this wildcard.
+@router.get("/{scan_id}")
+def get_scan(scan_id: UUID, db: DbSession):
+    scan = _get_scan(db, scan_id)
+    return build_scan_snapshot(db, scan)
