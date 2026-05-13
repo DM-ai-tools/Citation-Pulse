@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -199,7 +199,12 @@ def entity_weekly_share_trend(
     series: list[dict[str, object]] = []
     for wk in sorted(per_week_total.keys()):
         tot = per_week_total[wk] or 1
-        week_label = wk.date().isoformat() if isinstance(wk, datetime) else str(wk)
+        if isinstance(wk, datetime):
+            week_label = wk.date().isoformat()
+        elif isinstance(wk, date):
+            week_label = wk.isoformat()
+        else:
+            week_label = str(wk)
         series.append(
             {
                 "week_start": week_label,
@@ -284,7 +289,12 @@ def multi_entity_weekly_share_trend(
             shares[str(primary.id)] = 0.0
             for cid in competitors:
                 shares[str(cid)] = 0.0
-        week_label = wk.date().isoformat() if isinstance(wk, datetime) else str(wk)
+        if isinstance(wk, datetime):
+            week_label = wk.date().isoformat()
+        elif isinstance(wk, date):
+            week_label = wk.isoformat()
+        else:
+            week_label = str(wk)
         series_out.append({"week_start": week_label, "shares": shares, "tracked_citations": tracked})
 
     return {

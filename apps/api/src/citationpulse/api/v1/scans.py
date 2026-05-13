@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from citationpulse.api.deps import DbSession
 from citationpulse.core.config import get_settings
 from citationpulse.db.session import SessionLocal
-from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent
+from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent, all_engines
 from citationpulse.schemas.scans import ScanCreate, ScanCreateResponse, ShareBody
 from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
 from citationpulse.services.rate_limit import allow_anonymous_scan
@@ -133,6 +133,49 @@ def _get_scan(db: Session, scan_id: UUID) -> Scan:
     return scan
 
 
+def _empty_multi_from_brand(db: Session, brand: Brand, tenant_id: UUID, days: int) -> dict[str, object]:
+    """Valid SoV multi payload when the real query fails so the funnel report can still render."""
+    primary = brand
+    competitors: dict[UUID, Brand] = {}
+    for cid in primary.competitors or []:
+        c = db.get(Brand, cid)
+        if c and c.tenant_id == tenant_id:
+            competitors[cid] = c
+    engines = all_engines()
+    zero_shares = {e: 0.0 for e in engines}
+    entity_rows: list[dict[str, object]] = [
+        {"entity_id": str(primary.id), "name": primary.name, "role": "brand", "shares_by_engine": dict(zero_shares)},
+    ]
+    for cid, comp in competitors.items():
+        entity_rows.append(
+            {"entity_id": str(cid), "name": comp.name, "role": "competitor", "shares_by_engine": dict(zero_shares)},
+        )
+    return {
+        "primary_brand_id": str(primary.id),
+        "range_days": days,
+        "engines": engines,
+        "entities": entity_rows,
+        "totals": {"brand_citations": 0, "competitor_citations": 0},
+    }
+
+
+def _empty_weekly_from_multi(multi: dict[str, object], weeks: int) -> dict[str, object]:
+    ents_raw = multi.get("entities") or []
+    entities_meta: list[dict[str, str]] = []
+    for e in ents_raw:
+        if not isinstance(e, dict) or "entity_id" not in e:
+            continue
+        entities_meta.append(
+            {
+                "entity_id": str(e["entity_id"]),
+                "name": str(e.get("name", "")),
+                "role": str(e.get("role", "other")),
+            }
+        )
+    primary_id = str(multi.get("primary_brand_id") or (entities_meta[0]["entity_id"] if entities_meta else ""))
+    return {"primary_brand_id": primary_id, "weeks": weeks, "entities": entities_meta, "series": []}
+
+
 @router.get("/{scan_id}/report")
 def get_scan_report(scan_id: UUID, db: DbSession):
     scan = _get_scan(db, scan_id)
@@ -174,6 +217,49 @@ def get_scan_sov_multi_weekly_trend(
     if not brand:
         raise HTTPException(status_code=404, detail="Scan has no brand")
     return multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=weeks)
+
+
+@router.get("/{scan_id}/sov/summary")
+def get_scan_sov_summary(
+    scan_id: UUID,
+    db: DbSession,
+    response: Response,
+    range: str = Query("84d", alias="range"),
+    weeks: int = Query(12, ge=4, le=52),
+):
+    """Return multi-engine + weekly SoV in one response (public; same access as ``/report``).
+
+    Funnel report pages use this instead of two parallel fetches so a single failing leg
+    does not surface as a hard error when the other succeeds.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    scan = _get_scan(db, scan_id)
+    brand = db.get(Brand, scan.brand_id)
+    if not brand:
+        raise HTTPException(status_code=404, detail="Scan has no brand")
+    days = parse_range_days(range)
+
+    try:
+        cand = multientity_sov_by_engine(db, brand.tenant_id, brand.id, days)
+        if isinstance(cand, dict) and cand.get("error"):
+            multi = _empty_multi_from_brand(db, brand, brand.tenant_id, days)
+        else:
+            multi = cand
+    except Exception:
+        _log.exception("multientity_sov_by_engine failed scan_id=%s", scan_id)
+        multi = _empty_multi_from_brand(db, brand, brand.tenant_id, days)
+
+    try:
+        cand_w = multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=weeks)
+        if isinstance(cand_w, dict) and cand_w.get("error"):
+            weekly = _empty_weekly_from_multi(multi, weeks)
+        else:
+            weekly = cand_w
+    except Exception:
+        _log.exception("multi_entity_weekly_share_trend failed scan_id=%s", scan_id)
+        weekly = _empty_weekly_from_multi(multi, weeks)
+
+    return {"multi_engine": multi, "multi_weekly_trend": weekly}
 
 
 @router.post("/{scan_id}/share")

@@ -28,6 +28,11 @@ import { engineTitle } from "@/lib/engineDisplay";
 import { shareScan } from "@/services/scans";
 import type { MatrixCell } from "@/types/scan";
 
+type SovBundleResponse = {
+  multi_engine: unknown;
+  multi_weekly_trend: unknown;
+};
+
 function formatReportTimestamp(iso: string | null | undefined, fallbackMs: number) {
   const raw = iso ? Date.parse(iso) : fallbackMs;
   const d = Number.isFinite(raw) ? new Date(raw) : new Date(fallbackMs);
@@ -53,8 +58,10 @@ function isValidSovWeeklyPayload(v: unknown): v is MultiWeeklyResponse {
 }
 
 export default function ReportPage() {
-  const params = useParams<{ scanId: string }>();
-  const scanId = params.scanId;
+  const params = useParams<{ scanId?: string | string[] }>();
+  const rawScanId = params?.scanId;
+  const scanId =
+    typeof rawScanId === "string" ? rawScanId : Array.isArray(rawScanId) ? (rawScanId[0] ?? "") : "";
   const q = useReport(scanId);
   const [layer, setLayer] = useState<string | null>(null);
 
@@ -94,20 +101,12 @@ export default function ReportPage() {
   const hasEmbeddedSov = isValidSovMultiPayload(embeddedMulti) && isValidSovWeeklyPayload(embeddedWeekly);
   const fetchSovFromPublicScanApi = Boolean(scanId && brandIdForSov && !hasEmbeddedSov);
 
-  const sovMulti = useQuery({
-    queryKey: ["sov-multi-engine", "scan", scanId, "84d"],
-    queryFn: async (): Promise<SoVMultiEntityResponse> => {
-      const r = await apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}/sov/multi-engine?range=84d`);
-      if (!r.ok) throw new Error(await r.text());
-      return r.json();
-    },
-    enabled: fetchSovFromPublicScanApi,
-    retry: false,
-  });
-  const sovWeekly = useQuery({
-    queryKey: ["sov-multi-weekly", "scan", scanId],
-    queryFn: async (): Promise<MultiWeeklyResponse> => {
-      const r = await apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}/sov/multi-weekly-trend?weeks=12`);
+  const sovBundle = useQuery({
+    queryKey: ["sov-summary", "scan", scanId, "84d", 12],
+    queryFn: async (): Promise<SovBundleResponse> => {
+      const r = await apiFetch(
+        `/api/v1/scans/${encodeURIComponent(scanId)}/sov/summary?range=84d&weeks=12`,
+      );
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
@@ -141,22 +140,32 @@ export default function ReportPage() {
   const d = q.data;
   const brandId = d.brand?.id ?? null;
 
+  const bundleMulti =
+    sovBundle.isSuccess && isValidSovMultiPayload(sovBundle.data.multi_engine)
+      ? (sovBundle.data.multi_engine as SoVMultiEntityResponse)
+      : undefined;
+  const bundleWeekly =
+    sovBundle.isSuccess && isValidSovWeeklyPayload(sovBundle.data.multi_weekly_trend)
+      ? (sovBundle.data.multi_weekly_trend as MultiWeeklyResponse)
+      : undefined;
+
   const multiSov: SoVMultiEntityResponse | undefined = hasEmbeddedSov
     ? (embeddedMulti as SoVMultiEntityResponse)
-    : sovMulti.isSuccess
-      ? sovMulti.data
-      : undefined;
+    : bundleMulti;
   const weeklySov: MultiWeeklyResponse | undefined = hasEmbeddedSov
     ? (embeddedWeekly as MultiWeeklyResponse)
-    : sovWeekly.isSuccess
-      ? sovWeekly.data
-      : undefined;
+    : bundleWeekly;
   const sovReady = Boolean(brandId && multiSov && weeklySov);
   const sovPending = Boolean(
-    brandId && !sovReady && fetchSovFromPublicScanApi && (sovMulti.isPending || sovWeekly.isPending),
+    brandId && !sovReady && fetchSovFromPublicScanApi && sovBundle.isPending,
   );
   const sovFetchError = Boolean(
-    brandId && fetchSovFromPublicScanApi && (sovMulti.isError || sovWeekly.isError),
+    brandId &&
+      fetchSovFromPublicScanApi &&
+      (sovBundle.isError ||
+        (sovBundle.isSuccess &&
+          (!isValidSovMultiPayload(sovBundle.data.multi_engine) ||
+            !isValidSovWeeklyPayload(sovBundle.data.multi_weekly_trend)))),
   );
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -220,7 +229,7 @@ export default function ReportPage() {
             <p className="mt-2 text-center text-xs text-amber-800">
               Share of voice block could not load — heatmap filters below still work. If DevTools shows{" "}
               <span className="font-mono">404</span>, redeploy the API so{" "}
-              <span className="font-mono">/api/v1/scans/…/sov/multi-engine</span> exists, then hard-refresh.
+              <span className="font-mono">/api/v1/scans/…/sov/summary</span> exists, then hard-refresh.
             </p>
           ) : null}
         </div>
