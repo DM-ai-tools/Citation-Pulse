@@ -149,6 +149,26 @@ class Settings(BaseSettings):
     # Public API (Phase 3) — optional HMAC
     public_api_hmac_secret: str = ""
 
+    # --- DataForSEO (optional) — Google Ads monthly search volumes by geo ---
+    # https://docs.dataforseo.com/v3/keywords_data/google_ads/search_volume/live/
+    # When both are set, scan completion will sync per-prompt monthly search
+    # volumes into ``prompt_metrics`` and the opportunities ``est_volume`` column.
+    # Unset both to skip DataForSEO entirely — opportunities still render with
+    # ``est_volume = null`` and the UI falls back to a dash.
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+
+    @field_validator("dataforseo_password", "dataforseo_login", mode="before")
+    @classmethod
+    def normalise_dataforseo_secrets(cls, v: object) -> str:
+        """Strip whitespace / accidental wrapping quotes so Railway .env typos don't yield HTTP 401."""
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+            s = s[1:-1].strip()
+        return s
+
 
 @lru_cache
 def get_settings() -> Settings:

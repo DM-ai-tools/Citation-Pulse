@@ -258,6 +258,108 @@ def est_volume_for_prompt(db: Session, prompt_id: UUID) -> int | None:
     return None
 
 
+def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
+    """Fetch DataForSEO Google Ads monthly search volumes for all brand prompts.
+
+    Groups prompts by locale, calls DataForSEO once per locale group, and upserts
+    the avg ``search_volume`` into ``prompt_metrics``. Silently skips when DataForSEO
+    is not configured or returns no data — the opportunity scorer falls back to
+    ``est_volume=None`` which still produces valid (lower) scores.
+
+    Returns the number of prompts whose volume was updated. Backported from
+    apps/api/services/opportunities.py so the Railway-deployed backend tree
+    can populate the "Est. monthly searches" column in the funnel report.
+    """
+    import re
+
+    from citationpulse.services.dataforseo_keywords import (
+        DataForSEOError,
+        dataforseo_configured,
+        fetch_google_ads_search_volumes,
+    )
+
+    if not dataforseo_configured():
+        _log.debug("sync_prompt_volumes: DataForSEO not configured, skipping")
+        return 0
+
+    prompts = list(
+        db.scalars(select(Prompt).where(Prompt.brand_id == brand_id, Prompt.enabled.is_(True))).all()
+    )
+    if not prompts:
+        return 0
+
+    # Group by locale so we make one DataForSEO call per geo (location_code).
+    by_locale: dict[str, list[Prompt]] = defaultdict(list)
+    for p in prompts:
+        by_locale[(p.locale or "en-US").strip()].append(p)
+
+    updated = 0
+    now = datetime.now(timezone.utc)
+
+    # DataForSEO rejects question marks and a handful of punctuation chars in
+    # the `keywords` array. Strip them and collapse extra whitespace so a prompt
+    # like "what is the best seo agency?" still gets a volume back.
+    _KW_BAD = re.compile(r"[?!;:\"'()\[\]{}<>@#$%^&*\\|~`]")
+
+    def _clean_keyword(text: str) -> str:
+        cleaned = _KW_BAD.sub(" ", text[:700])
+        return " ".join(cleaned.split())
+
+    for locale, locale_prompts in by_locale.items():
+        loc_lower = locale.lower()
+        location_code = _LOCALE_TO_LOCATION.get(loc_lower, _DEFAULT_LOCATION_CODE)
+        language_code = loc_lower.split("-")[0] or "en"
+
+        keywords = [_clean_keyword(p.text) for p in locale_prompts]
+        try:
+            rows = fetch_google_ads_search_volumes(
+                keywords,
+                location_code=location_code,
+                language_code=language_code,
+            )
+        except DataForSEOError as exc:
+            _log.warning(
+                "sync_prompt_volumes DataForSEO error brand_id=%s locale=%s: %s",
+                brand_id,
+                locale,
+                exc,
+            )
+            continue
+
+        vol_map: dict[str, int] = {}
+        for row in rows:
+            kw = (row.get("keyword") or "").strip().lower()
+            sv = row.get("search_volume")
+            if kw and isinstance(sv, (int, float)) and sv >= 0:
+                vol_map[kw] = int(sv)
+
+        for p in locale_prompts:
+            kw_key = _clean_keyword(p.text).lower()
+            volume = vol_map.get(kw_key)
+            if volume is None:
+                # Fuzzy: try a prefix-overlap match when the API echoed a slightly
+                # different normalisation of our keyword.
+                for k, v in vol_map.items():
+                    if kw_key.startswith(k[:40]) or k.startswith(kw_key[:40]):
+                        volume = v
+                        break
+            if volume is None:
+                continue
+            existing = db.get(PromptMetrics, p.id)
+            if existing:
+                existing.est_volume = volume
+                existing.updated_at = now
+            else:
+                db.add(PromptMetrics(prompt_id=p.id, est_volume=volume, updated_at=now))
+            updated += 1
+
+    if updated:
+        db.commit()
+        _log.info("sync_prompt_volumes brand_id=%s updated=%d prompts", brand_id, updated)
+
+    return updated
+
+
 def upsert_opportunity_row(
     db: Session,
     *,

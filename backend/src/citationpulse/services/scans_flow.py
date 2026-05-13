@@ -414,16 +414,25 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
 
     opportunities: list[dict[str, object]] = []
     if brand:
+        from citationpulse.services.dataforseo_keywords import dataforseo_configured
         from citationpulse.services.opportunities import (
             detect_opportunities_for_brand,
             heat_from_grade,
             list_opportunities_for_brand,
+            sync_prompt_volumes_for_brand,
         )
 
         rows = list_opportunities_for_brand(db, brand.id, status="open")
-        if not rows and scan.status == "completed":
+        missing_volume = bool(rows) and any(o.est_volume is None for o in rows)
+        should_refresh = scan.status == "completed" and (
+            not rows or (missing_volume and dataforseo_configured())
+        )
+        if should_refresh:
             try:
                 eng_ov = list(scan.engines) if scan.engines else None
+                # Pull DataForSEO volumes first so the new detect/upsert pass below
+                # writes them into `opportunities.est_volume` in one go.
+                sync_prompt_volumes_for_brand(db, brand.id)
                 detect_opportunities_for_brand(db, brand.id, engines_override=eng_ov)
                 rows = list_opportunities_for_brand(db, brand.id, status="open")
             except Exception:
