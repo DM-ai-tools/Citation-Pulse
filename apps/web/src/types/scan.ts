@@ -13,6 +13,7 @@ export type MatrixCell = {
   promptId: string;
   engine: string;
   status: CellStatus;
+  /** When ``status`` is ``cited``: 1-based rank of the best (earliest) brand URL in the engine's citation list (``1`` = first / "top"). */
   position?: number;
   /** Total citations returned by this engine for this prompt (may be > citations.length). */
   citationsCount?: number;

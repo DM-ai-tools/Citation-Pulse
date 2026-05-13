@@ -275,7 +275,10 @@ def cell_status_for_run(db: Session, run: EngineRun) -> dict[str, object]:
         pos = min(positions) if positions else None
         out: dict[str, object] = {**enriched, "status": "cited"}
         if pos is not None:
-            out["position"] = int(pos)
+            # Citations are persisted with 0-based list indices (see ``geo._persist_citations_from_response``
+            # and ``llm_router._extract_citations``). The web UI treats ``1`` as first visible slot ("top")
+            # for breakdown cards, scores, and heatmap colours — convert here so one field is canonical.
+            out["position"] = int(pos) + 1
         return out
     if comp_cites:
         return {**enriched, "status": "comp"}

@@ -255,7 +255,8 @@ def cell_status_for_run(db: Session, run: EngineRun) -> dict[str, object]:
         pos = min(positions) if positions else None
         out: dict[str, object] = {**enriched, "status": "cited"}
         if pos is not None:
-            out["position"] = int(pos)
+            # Citations use 0-based indices in storage; matrix UI expects 1-based rank (1 = top).
+            out["position"] = int(pos) + 1
         return out
     if comp_cites:
         return {**enriched, "status": "comp"}
