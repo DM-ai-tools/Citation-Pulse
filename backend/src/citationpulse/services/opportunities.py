@@ -216,7 +216,7 @@ TEMPLATES: dict[str, str] = {
     "absent_all": "Brand absent across all {n} engines · {vol}/mo searches",
     "competitor_dominant": "Competitor cited {comp}× · brand absent · {vol}/mo",
     "engine_specific_gap": "Cited on {cited} engines but absent from {engine_label}",
-    "weak_engine": "Strong on APIs, weak on {engine_label} · {vol}/mo",
+    "weak_engine": "Strong on other models, weaker on {engine_label} · {vol}/mo",
     "refresh_content": "{top_competitor} dominates on this engine · refresh content",
     "extend_presence": "Brand not visible on {engine_label} · {absent_n} of {n} engines still open · {vol}/mo demand",
 }
