@@ -16,6 +16,7 @@ function pctForCell(c: MatrixCell | undefined): number {
   if (c.status === "comp") return 0;
   if (c.status === "running") return 0;
   if (c.status === "queued") return 0;
+  if (c.status === "error") return 0;
   return 0;
 }
 

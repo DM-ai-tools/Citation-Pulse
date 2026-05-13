@@ -15,12 +15,12 @@ export function useScan(scanId: string) {
     // Fallback when EventSource is blocked (CORS / mixed content / corporate proxy).
     refetchInterval: (query) => {
       const d = query.state.data;
-      if (!d || d.status === "completed") return false;
+      if (!d || d.status === "completed" || d.status === "failed") return false;
       return 2500;
     },
   });
 
-  const done = q.data?.status === "completed";
+  const done = q.data?.status === "completed" || q.data?.status === "failed";
   useEventSource(
     scanId ? scanStreamUrl(scanId) : null,
     (ev) => {

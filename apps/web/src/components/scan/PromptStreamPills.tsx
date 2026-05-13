@@ -16,6 +16,9 @@ function promptShort(text: string, max = 32) {
 
 export function PromptStreamPills({ data }: { data: ScanSnapshot }) {
   const items: { key: string; label: string; status: MatrixCell["status"] }[] = [];
+  const terminalOk = (s: MatrixCell["status"]) => s === "cited" || s === "comp" || s === "none";
+  const terminalErr = (s: MatrixCell["status"]) => s === "error";
+  const terminal = (s: MatrixCell["status"]) => terminalOk(s) || terminalErr(s);
   for (const p of data.prompts) {
     for (const e of data.engines) {
       const c = cellFor(data.matrix.cells, p.id, e);
@@ -28,7 +31,7 @@ export function PromptStreamPills({ data }: { data: ScanSnapshot }) {
       });
     }
   }
-  const done = items.filter((i) => i.status === "cited" || i.status === "comp" || i.status === "none").length;
+  const done = items.filter((i) => terminal(i.status)).length;
   const run = items.filter((i) => i.status === "running").length;
   const q = items.filter((i) => i.status === "queued").length;
   const nP = data.prompts.length;
@@ -55,16 +58,18 @@ export function PromptStreamPills({ data }: { data: ScanSnapshot }) {
             key={it.key}
             className={cn(
               "inline-flex max-w-[280px] items-center rounded-full px-2.5 py-1 font-display text-xs font-semibold leading-tight",
-              it.status === "cited" || it.status === "comp" || it.status === "none"
+              terminalOk(it.status)
                 ? "bg-[rgba(31,179,107,0.12)] text-[#14653e]"
-                : it.status === "running"
+                : terminalErr(it.status)
+                  ? "border border-slate-400 bg-slate-100 text-slate-800"
+                  : it.status === "running"
                   ? "border border-dashed border-brand-primary bg-brand-primary/[0.18] text-tr-teal animate-landing-pulse"
                   : "border border-tr-line bg-white text-tr-mute",
             )}
           >
             <span className="truncate">
               {it.label}
-              {it.status === "cited" || it.status === "comp" || it.status === "none" ? " ✓" : ""}
+              {terminalOk(it.status) ? " ✓" : terminalErr(it.status) ? " !" : ""}
               {it.status === "running" ? " ⟳" : ""}
             </span>
           </span>

@@ -68,6 +68,23 @@ function ReportMatrixCell({ cell, mode }: { cell: MatrixCell | undefined; mode: 
       </div>
     );
   }
+  if (st === "error") {
+    const hint = cell?.errorMessage?.trim();
+    return (
+      <div
+        className={cn(
+          box,
+          "cursor-default border border-slate-400 bg-slate-600 font-display text-[9px] font-extrabold text-white",
+        )}
+        title={hint || "Engine run failed"}
+      >
+        <span className="leading-tight">error</span>
+        <small className="mt-0.5 line-clamp-2 text-[8px] font-semibold uppercase leading-tight opacity-95 sm:text-[9.5px]">
+          run failed
+        </small>
+      </div>
+    );
+  }
   return (
     <div
       className={cn(
@@ -117,6 +134,17 @@ function LegacyMatrixTile({ cell, mode }: { cell: MatrixCell | undefined; mode: 
         <span className="text-[8px] font-bold uppercase tracking-wide sm:text-[10px]">comp</span>
         <span className="mt-0.5 line-clamp-2 text-[8px] font-semibold uppercase leading-tight opacity-95 sm:text-[9px]">
           competitor
+        </span>
+      </div>
+    );
+  }
+  if (st === "error") {
+    const hint = cell?.errorMessage?.trim();
+    return (
+      <div className={cn(tile, "border border-slate-500 bg-slate-600 text-white")} title={hint || "Engine run failed"}>
+        <span className="text-[8px] font-bold uppercase tracking-wide sm:text-[10px]">error</span>
+        <span className="mt-0.5 line-clamp-2 text-[8px] font-semibold uppercase leading-tight sm:text-[9px]">
+          run failed
         </span>
       </div>
     );

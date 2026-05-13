@@ -18,7 +18,7 @@ export function HeatmapBreakdownCards({
   engineCount?: number;
   citationScore?: number;
 }) {
-  const { brandTop, brandLower, comp, none, pct } = heatmapBreakdownCounts(cells);
+  const { brandTop, brandLower, comp, none, engineError, pct } = heatmapBreakdownCounts(cells);
   const cards = [
     {
       label: "BRAND CITED",
@@ -52,6 +52,18 @@ export function HeatmapBreakdownCards({
       numClass: "text-white",
       smallClass: "text-white/90",
     },
+    ...(engineError > 0
+      ? [
+          {
+            label: "RUN FAILED",
+            sub: `${pct(engineError)}%`,
+            val: engineError,
+            wrap: "border border-slate-400 bg-slate-600 text-white",
+            numClass: "text-white",
+            smallClass: "text-white/90",
+          },
+        ]
+      : []),
   ];
   const layerName = layer ? engineTitle(layer).toUpperCase() : "ALL ENGINES";
   const headerMeta =
@@ -75,7 +87,12 @@ export function HeatmapBreakdownCards({
           </p>
         )}
       </div>
-      <div className="grid gap-3 p-[22px] sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        className={cn(
+          "grid gap-3 p-[22px] sm:grid-cols-2",
+          cards.length > 4 ? "lg:grid-cols-3 xl:grid-cols-5" : "lg:grid-cols-4",
+        )}
+      >
         {cards.map((c) => (
           <div key={c.label} className={cn("rounded-xl px-4 py-5 text-center shadow-sm", c.wrap)}>
             <b className={cn("font-display text-[38px] font-black leading-none tabular-nums", c.numClass)}>

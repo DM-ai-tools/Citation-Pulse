@@ -1,6 +1,6 @@
 export type EngineKey = "chatgpt" | "perplexity" | "gemini" | "claude";
 
-export type CellStatus = "queued" | "running" | "cited" | "comp" | "none";
+export type CellStatus = "queued" | "running" | "cited" | "comp" | "none" | "error";
 
 export type CellCitation = {
   url: string;
@@ -18,6 +18,8 @@ export type MatrixCell = {
   citationsCount?: number;
   /** Top citations (max 8), pre-sorted brand > competitor > neutral. */
   citations?: CellCitation[];
+  /** Present when the engine run failed (HTTP/provider error, missing key, etc.). */
+  errorMessage?: string | null;
 };
 
 export type ScanSnapshot = {
@@ -45,6 +47,9 @@ export type ScanEvent =
       engine: string;
       status: CellStatus;
       position?: number;
+      citationsCount?: number;
+      citations?: CellCitation[];
+      errorMessage?: string | null;
     }
   | { type: "scan.eta"; etaSeconds: number }
   | { type: "scan.completed"; score: number };

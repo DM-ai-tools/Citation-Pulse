@@ -14,18 +14,27 @@ export function promptCompletionPct(
     for (const e of engines) {
       const c = cells.find((x) => x.promptId === p.id && x.engine === e);
       const st = c?.status ?? "queued";
-      if (st === "cited" || st === "comp" || st === "none") done += 1;
+      if (st === "cited" || st === "comp" || st === "none" || st === "error") done += 1;
     }
   }
   return Math.round((100 * done) / total);
 }
 
-/** Every prompt × engine cell is terminal (cited / comp / none, including failed runs shown as none). */
+/** Every prompt × engine cell is terminal (cited / comp / none / error). */
 export function matrixAllEnginesTerminal(
   prompts: { id: string }[],
   engines: string[],
   cells: MatrixCell[],
+  scanStatus?: string,
 ): boolean {
+  if (
+    (scanStatus === "completed" || scanStatus === "failed") &&
+    cells.length === 0 &&
+    prompts.length > 0 &&
+    engines.length > 0
+  ) {
+    return true;
+  }
   if (!prompts.length || !engines.length) return false;
   return promptCompletionPct(prompts, engines, cells, null) === 100;
 }
@@ -60,7 +69,7 @@ export function engineLayerScores(
       const st = c?.status;
       if (st === "cited") pts += c?.position === 1 ? 100 : 75;
       else if (st === "comp") pts += 55;
-      else if (st === "none") pts += 0;
+      else if (st === "none" || st === "error") pts += 0;
       else if (st === "running") pts += 30;
       else pts += 10;
     }
@@ -74,11 +83,13 @@ export function heatmapBreakdownCounts(cells: MatrixCell[]) {
   let brandLower = 0;
   let comp = 0;
   let none = 0;
+  let engineError = 0;
   for (const c of cells) {
     if (c.status === "cited") {
       if (c.position === 1) brandTop += 1;
       else brandLower += 1;
     } else if (c.status === "comp") comp += 1;
+    else if (c.status === "error") engineError += 1;
     else if (c.status === "none") none += 1;
   }
   const total = cells.length || 1;
@@ -87,6 +98,7 @@ export function heatmapBreakdownCounts(cells: MatrixCell[]) {
     brandLower,
     comp,
     none,
+    engineError,
     pct: (n: number) => Math.round((100 * n) / total),
   };
 }

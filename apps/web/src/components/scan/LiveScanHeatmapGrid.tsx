@@ -42,6 +42,17 @@ function MatrixCellBox({ cell }: { cell: MatrixCell | undefined }) {
       </div>
     );
   }
+  if (st === "error") {
+    const hint = cell?.errorMessage?.trim();
+    return (
+      <div
+        className="flex h-11 items-center justify-center rounded-lg border border-slate-500 bg-slate-600 font-display text-[10px] font-extrabold text-white"
+        title={hint || "Engine run failed"}
+      >
+        err
+      </div>
+    );
+  }
   return (
     <div className="flex h-11 items-center justify-center rounded-lg border border-[#c93f30] bg-[#E74C3C] font-display text-xs font-extrabold text-white">
       none
@@ -109,6 +120,9 @@ export function LiveScanHeatmapGrid({
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3.5 w-3.5 rounded border border-tr-line bg-white" /> Queued
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3.5 w-3.5 rounded border border-slate-500 bg-slate-600" /> Run failed
         </span>
       </div>
       </div>

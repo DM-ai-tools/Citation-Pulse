@@ -273,6 +273,7 @@ def fan_out_scan_task(scan_id: str) -> str:
         n = max(1, len(prompts) * len(eng_list))
         publish_scan_event(scan_id, {"type": "scan.eta", "etaSeconds": min(900, n * 40)})
 
+        runs_enqueued = 0
         for p in prompts:
             for e in eng_list:
                 try:
@@ -291,6 +292,20 @@ def fan_out_scan_task(scan_id: str) -> str:
                 # Must commit before enqueue: run_engine uses its own session and cannot see
                 # uncommitted rows; eager mode runs immediately (no time for a final batch commit).
                 run_engine_task.delay(str(run.id))
+                runs_enqueued += 1
+
+        if runs_enqueued == 0:
+            # No `EngineRun` rows → `maybe_complete_scan` can never finish (expected > 0, total == 0).
+            scan = db.get(Scan, UUID(scan_id))
+            if scan:
+                scan.status = "completed"
+                scan.completed_at = datetime.now(timezone.utc)
+                scan.score_overall = 0
+                db.commit()
+                publish_scan_event(scan_id, {"type": "scan.completed", "score": 0})
+            _log.warning("fan_out_scan produced zero runs scan_id=%s prompts=%s engines=%s", scan_id, len(prompts), eng_list)
+            return "no_runs"
+
         return "enqueued"
     finally:
         db.close()

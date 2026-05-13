@@ -19,7 +19,7 @@ export default function LiveScanPage() {
   const matrixReady = useMemo(() => {
     const d = q.data;
     if (!d) return false;
-    return matrixAllEnginesTerminal(d.prompts, d.engines, d.matrix.cells);
+    return matrixAllEnginesTerminal(d.prompts, d.engines, d.matrix.cells, d.status);
   }, [q.data]);
 
   const prevCompletedRef = useRef(false);
@@ -35,23 +35,25 @@ export default function LiveScanPage() {
   /* After the API marks the scan completed, pull a fresh snapshot once so the matrix
      matches the server if SSE events arrived out of order. */
   useEffect(() => {
-    const completed = q.data?.status === "completed";
-    if (completed && !prevCompletedRef.current) {
+    const terminal = q.data?.status === "completed" || q.data?.status === "failed";
+    if (terminal && !prevCompletedRef.current) {
       prevCompletedRef.current = true;
       void q.refetch();
     }
-    if (!completed) prevCompletedRef.current = false;
+    if (!terminal) prevCompletedRef.current = false;
   }, [q.data?.status, q]);
 
   useEffect(() => {
-    if (q.data?.status === "completed" && matrixReady) {
+    const terminal = q.data?.status === "completed" || q.data?.status === "failed";
+    if (terminal && matrixReady) {
       router.replace(`/report/${scanId}`);
     }
   }, [q.data?.status, matrixReady, router, scanId]);
 
   /* If SSE never updates the matrix but the scan is already completed, do not block the funnel forever. */
   useEffect(() => {
-    if (q.data?.status !== "completed" || matrixReady) return;
+    const terminal = q.data?.status === "completed" || q.data?.status === "failed";
+    if (!terminal || matrixReady) return;
     const id = window.setTimeout(() => {
       router.replace(`/report/${scanId}`);
     }, 45_000);

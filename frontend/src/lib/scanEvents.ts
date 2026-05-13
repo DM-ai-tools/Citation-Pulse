@@ -1,4 +1,4 @@
-import type { ScanEvent, ScanSnapshot } from "@/types/scan";
+import type { ScanEvent, ScanSnapshot, MatrixCell } from "@/types/scan";
 
 /** Pure reducer for SSE events → scan snapshot (TanStack Query cache updater). */
 export function applyScanEvent(prev: ScanSnapshot | undefined, event: ScanEvent): ScanSnapshot {
@@ -26,12 +26,15 @@ export function applyScanEvent(prev: ScanSnapshot | undefined, event: ScanEvent)
   if (event.type === "cell.update") {
     const cells = [...prev.matrix.cells];
     const idx = cells.findIndex((c) => c.promptId === event.promptId && c.engine === event.engine);
-    const next: typeof cells[0] = {
+    const next: MatrixCell = {
       promptId: event.promptId,
       engine: event.engine,
       status: event.status,
     };
     if (event.position !== undefined) next.position = event.position;
+    if (event.citationsCount !== undefined) next.citationsCount = event.citationsCount;
+    if (event.citations !== undefined) next.citations = event.citations;
+    if (event.errorMessage !== undefined) next.errorMessage = event.errorMessage;
     if (idx >= 0) cells[idx] = next;
     else cells.push(next);
     return {

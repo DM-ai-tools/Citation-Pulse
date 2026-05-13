@@ -18,7 +18,7 @@ export function ScanLiveHeader({
   status: string;
   url: string;
 }) {
-  const live = status !== "completed";
+  const live = status !== "completed" && status !== "failed";
   const host = rootHost(url);
 
   return (
