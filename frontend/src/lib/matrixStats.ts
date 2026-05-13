@@ -78,15 +78,10 @@ export function engineLayerScores(
   return out;
 }
 
-/** True when this cell’s returned URLs include a linked competitor (even if the brand is also cited). */
-function cellHasCompetitorCitation(c: MatrixCell): boolean {
-  return (c.citations ?? []).some((x) => x.ownership === "competitor");
-}
-
 export function heatmapBreakdownCounts(cells: MatrixCell[]) {
   let brandTop = 0;
   let brandLower = 0;
-  /** Cells where a linked competitor appears in URLs (matrix `comp` **or** `cited` alongside competitor results). */
+  /** Orange tiles only: ``status === "comp"`` (competitor cited, brand absent in that cell). */
   let comp = 0;
   let none = 0;
   let engineError = 0;
@@ -96,8 +91,7 @@ export function heatmapBreakdownCounts(cells: MatrixCell[]) {
       else brandLower += 1;
     } else if (c.status === "error") engineError += 1;
     else if (c.status === "none") none += 1;
-
-    if (c.status === "comp" || cellHasCompetitorCitation(c)) comp += 1;
+    else if (c.status === "comp") comp += 1;
   }
   const total = cells.length || 1;
   return {
