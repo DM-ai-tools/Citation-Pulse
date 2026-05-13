@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { cn } from "@/lib/utils";
 import type { MatrixCell } from "@/types/scan";
 
@@ -27,6 +28,14 @@ function cellClass(p: number) {
   return "bg-[rgba(231,76,60,0.16)] text-[#b73121]";
 }
 
+const headCell =
+  "border-b border-tr-line bg-[#F6FCF8] px-1.5 py-2 text-left font-display text-[9px] font-extrabold uppercase leading-tight tracking-wide text-tr-navy sm:px-2 sm:text-[10.5px]";
+const headCellEngine = `${headCell} text-center`;
+const bodyPrompt =
+  "border-b border-tr-line px-1.5 py-2 text-left text-[11px] font-bold leading-snug text-tr-navy sm:px-2 sm:text-[12.5px]";
+const bodyPct =
+  "border-b border-tr-line px-1 py-2 text-center text-[11px] font-extrabold tabular-nums sm:px-2 sm:text-[12.5px]";
+
 export function PromptEngineScoreMatrix({
   prompts,
   engines,
@@ -38,54 +47,44 @@ export function PromptEngineScoreMatrix({
   cells: MatrixCell[];
   title?: string;
 }) {
+  const n = engines.length || 1;
+  const gridTemplateColumns = `minmax(0, 1.35fr) repeat(${n}, minmax(0, 1fr))`;
+
   return (
     <div className="overflow-hidden rounded-[18px] border border-tr-line bg-white shadow-[0_8px_30px_rgba(10,37,64,0.06)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-tr-line px-[22px] py-[18px]">
         <h3 className="font-display text-sm font-extrabold uppercase tracking-wide text-tr-navy">{title}</h3>
         <p className="text-xs text-tr-mute">% cited</p>
       </div>
-      <div className="overflow-x-auto p-[22px]">
-        <table className="mtx w-full min-w-[520px] border-separate border-spacing-0 text-[12.5px]">
-          <thead>
-            <tr>
-              <th className="border-b border-tr-line bg-[#F6FCF8] px-3 py-2.5 text-left font-display text-[10.5px] font-extrabold uppercase tracking-wide text-tr-navy">
-                Prompt
-              </th>
-              {engines.map((e) => (
-                <th
-                  key={e}
-                  className="border-b border-tr-line bg-[#F6FCF8] px-3 py-2.5 text-center font-display text-[10.5px] font-extrabold uppercase tracking-wide text-tr-navy"
-                >
-                  {ENGINE_HEAD[e] ?? e.toUpperCase()}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {prompts.map((p) => (
-              <tr key={p.id}>
-                <td className="border-b border-tr-line px-3 py-2.5 text-left font-bold text-tr-navy">
-                  <span className="line-clamp-2">{p.text}</span>
-                </td>
-                {engines.map((e) => {
-                  const c = cells.find((x) => x.promptId === p.id && x.engine === e);
-                  const v = pctForCell(c);
-                  return (
-                    <td
-                      key={e}
-                      className={cn(
-                        "border-b border-tr-line px-3 py-2.5 text-center font-extrabold tabular-nums",
-                        cellClass(v),
-                      )}
-                    >
-                      {v}%
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="min-w-0 overflow-hidden px-3 py-4 sm:px-[22px] sm:py-[22px]">
+        <div
+          className="grid w-full min-w-0 gap-x-0 border border-tr-line text-[10px] sm:gap-x-px sm:text-[12.5px]"
+          style={{ gridTemplateColumns }}
+        >
+          <div className={headCell}>Prompt</div>
+          {engines.map((e) => (
+            <div key={e} className={headCellEngine}>
+              <span className="block break-words">{ENGINE_HEAD[e] ?? e.toUpperCase()}</span>
+            </div>
+          ))}
+
+          {prompts.map((p) => (
+            <Fragment key={p.id}>
+              <div className={cn(bodyPrompt, "min-w-0")}>
+                <span className="line-clamp-2 break-words">{p.text}</span>
+              </div>
+              {engines.map((e) => {
+                const c = cells.find((x) => x.promptId === p.id && x.engine === e);
+                const v = pctForCell(c);
+                return (
+                  <div key={e} className={cn(bodyPct, "min-w-0", cellClass(v))}>
+                    {v}%
+                  </div>
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
       </div>
     </div>
   );
