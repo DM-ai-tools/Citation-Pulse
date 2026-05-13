@@ -69,7 +69,7 @@ export default function ReportPage() {
     return formatReportTimestamp(q.data.completed_at, q.dataUpdatedAt);
   }, [q.data, q.dataUpdatedAt]);
 
-  /** Scan report embeds SoV so anonymous funnel users do not hit Clerk-protected ``/brands/.../sov`` routes. */
+  /** Prefer SoV embedded in the report; otherwise fetch via scan (public), never ``/brands/.../sov`` (Clerk). */
   const brandIdForSov = q.data?.brand?.id ?? null;
   const embeddedMulti = q.data?.sov_multi_engine;
   const embeddedWeekly = q.data?.sov_multi_weekly_trend;
@@ -81,28 +81,26 @@ export default function ReportPage() {
       Array.isArray((embeddedMulti as { entities?: unknown }).entities) &&
       Array.isArray((embeddedWeekly as { series?: unknown }).series),
   );
-  const fetchSovFromBrandsApi = !!brandIdForSov && !hasEmbeddedSov;
+  const fetchSovFromPublicScanApi = Boolean(scanId && brandIdForSov && !hasEmbeddedSov);
 
   const sovMulti = useQuery({
-    queryKey: ["sov-multi-engine", brandIdForSov, "84d"],
+    queryKey: ["sov-multi-engine", "scan", scanId, "84d"],
     queryFn: async (): Promise<SoVMultiEntityResponse> => {
-      const id = brandIdForSov as string;
-      const r = await apiFetch(`/api/v1/brands/${encodeURIComponent(id)}/sov/multi-engine?range=84d`);
+      const r = await apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}/sov/multi-engine?range=84d`);
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    enabled: fetchSovFromBrandsApi,
+    enabled: fetchSovFromPublicScanApi,
     retry: false,
   });
   const sovWeekly = useQuery({
-    queryKey: ["sov-multi-weekly", brandIdForSov],
+    queryKey: ["sov-multi-weekly", "scan", scanId],
     queryFn: async (): Promise<MultiWeeklyResponse> => {
-      const id = brandIdForSov as string;
-      const r = await apiFetch(`/api/v1/brands/${encodeURIComponent(id)}/sov/multi-weekly-trend?weeks=12`);
+      const r = await apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}/sov/multi-weekly-trend?weeks=12`);
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    enabled: fetchSovFromBrandsApi,
+    enabled: fetchSovFromPublicScanApi,
     retry: false,
   });
 
@@ -144,10 +142,10 @@ export default function ReportPage() {
       : undefined;
   const sovReady = Boolean(brandId && multiSov && weeklySov);
   const sovPending = Boolean(
-    brandId && !sovReady && fetchSovFromBrandsApi && (sovMulti.isPending || sovWeekly.isPending),
+    brandId && !sovReady && fetchSovFromPublicScanApi && (sovMulti.isPending || sovWeekly.isPending),
   );
   const sovFetchError = Boolean(
-    brandId && fetchSovFromBrandsApi && (sovMulti.isError || sovWeekly.isError),
+    brandId && fetchSovFromPublicScanApi && (sovMulti.isError || sovWeekly.isError),
   );
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -210,10 +208,8 @@ export default function ReportPage() {
           {sovFetchError ? (
             <p className="mt-2 text-center text-xs text-amber-800">
               Share of voice block could not load — heatmap filters below still work. If DevTools shows{" "}
-              <span className="font-mono">404</span> on{" "}
-              <span className="font-mono">multi-engine</span>, point{" "}
-              <span className="font-mono">NEXT_PUBLIC_API_URL</span> at your FastAPI URL and rebuild Web, redeploy API, or use{" "}
-              <span className="font-mono">same-origin</span> + <span className="font-mono">API_PROXY_TARGET</span> (see Railway README).
+              <span className="font-mono">404</span>, redeploy the API so{" "}
+              <span className="font-mono">/api/v1/scans/…/sov/multi-engine</span> exists, then hard-refresh.
             </p>
           ) : null}
         </div>

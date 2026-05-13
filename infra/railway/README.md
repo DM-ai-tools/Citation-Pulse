@@ -74,7 +74,7 @@ Set these on Web:
 - **Alternative (same-origin API):** `NEXT_PUBLIC_API_URL=same-origin` and set **`API_PROXY_TARGET=https://<your-api-domain>`** on the Web service at **build** time. The browser then calls `/api/v1/...` on the web host; Next.js rewrites proxy to FastAPI. Use this when you want one public origin or you keep seeing **404** on `multi-engine` because requests were accidentally hitting the web host instead of the API.
 - `NEXT_PUBLIC_APP_VERSION` (optional) — e.g. `RAILWAY_GIT_COMMIT_SHA` or a release tag, passed as a Docker build-arg so `/dashboard` can show **App build:** in the footer and you can confirm deploy revision in the browser.
 
-**Troubleshooting:** In DevTools → Network, if **`report`** is **200** but **`multi-engine`** / **`multi-weekly-trend`** are **404**, the URL your browser uses for `/api/v1/brands/...` is not your FastAPI app (wrong `NEXT_PUBLIC_API_URL`, or an **old API deploy** without those routes). Redeploy the **API** from current `main`, or switch to **same-origin + `API_PROXY_TARGET`**. Newer APIs also embed SoV inside the scan **report** JSON (`sov_multi_engine`, `sov_multi_weekly_trend`); after redeploying **API + Web**, the report page should stop calling those brand routes when embed is present.
+**Troubleshooting:** In DevTools → Network, if **`report`** is **200** but SoV fetches **404**, redeploy the **API** from current `main`. The funnel report uses **`GET /api/v1/scans/{scan_id}/sov/multi-engine`** and **`…/multi-weekly-trend`** (same public access as ``/report``), not ``/brands/.../sov``. Newer APIs also embed SoV inside the **report** JSON; after redeploying **API + Web**, the report page prefers embed when present.
 
 Optional but recommended:
 

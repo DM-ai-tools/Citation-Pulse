@@ -5,7 +5,7 @@ import json
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,11 +18,16 @@ from citationpulse.schemas.scans import ScanCreate, ScanCreateResponse, ShareBod
 from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
 from citationpulse.services.rate_limit import allow_anonymous_scan
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
+from citationpulse.services.brand_dashboard import parse_range_days
 from citationpulse.services.scans_flow import (
     available_engines,
     build_scan_report,
     build_scan_snapshot,
     get_or_create_anonymous_tenant,
+)
+from citationpulse.services.sov_entities import (
+    multi_entity_weekly_share_trend,
+    multientity_sov_by_engine,
 )
 from citationpulse.tasks.geo import fan_out_scan_task
 
@@ -138,6 +143,39 @@ def get_scan(scan_id: UUID, db: DbSession):
 def get_scan_report(scan_id: UUID, db: DbSession):
     scan = _get_scan(db, scan_id)
     return build_scan_report(db, scan)
+
+
+@router.get("/{scan_id}/sov/multi-engine")
+def get_scan_sov_multi_engine(
+    scan_id: UUID,
+    db: DbSession,
+    range: str = Query("30d", alias="range"),
+):
+    """Multi-entity SoV by engine for this scan's brand (public; same access model as ``/report``).
+
+    Funnel report pages must not call ``GET /brands/.../sov/*`` (Clerk + tenant checks); use this
+    route keyed by ``scan_id`` instead.
+    """
+    scan = _get_scan(db, scan_id)
+    brand = db.get(Brand, scan.brand_id)
+    if not brand:
+        raise HTTPException(status_code=404, detail="Scan has no brand")
+    days = parse_range_days(range)
+    return multientity_sov_by_engine(db, brand.tenant_id, brand.id, days)
+
+
+@router.get("/{scan_id}/sov/multi-weekly-trend")
+def get_scan_sov_multi_weekly_trend(
+    scan_id: UUID,
+    db: DbSession,
+    weeks: int = Query(12, ge=4, le=52),
+):
+    """Weekly multi-entity SoV for this scan's brand (public; same access model as ``/report``)."""
+    scan = _get_scan(db, scan_id)
+    brand = db.get(Brand, scan.brand_id)
+    if not brand:
+        raise HTTPException(status_code=404, detail="Scan has no brand")
+    return multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=weeks)
 
 
 @router.post("/{scan_id}/share")
