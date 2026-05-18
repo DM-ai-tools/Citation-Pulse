@@ -14,7 +14,7 @@ from citationpulse.api.v1.scans import router as scans_router
 from citationpulse.api.v1.operator import router as operator_router
 from citationpulse.api.v1.partner import router as partner_router
 from citationpulse.api.webhooks.stripe import router as stripe_router
-from citationpulse.core.config import get_settings
+from citationpulse.core.config import celery_run_tasks_inline, get_settings
 from citationpulse.core.observability import setup_observability
 from citationpulse.db.runtime_bootstrap import ensure_opportunities_schema
 from citationpulse.db.session import get_engine
@@ -34,6 +34,10 @@ async def lifespan(app: FastAPI):
         _log.warning(
             "OPENROUTER_API_KEY is empty on this service — scans will fail OpenRouter auth until set."
         )
+    if celery_run_tasks_inline(s):
+        _log.info("Celery tasks run inline in the API process (no separate worker consumer).")
+    else:
+        _log.info("Celery tasks use the broker; ensure a worker service is running.")
     yield
 
 
@@ -115,6 +119,7 @@ def health():
     return {
         "status": "ok",
         "openrouter_configured": openrouter_configured(),
+        "celery_tasks_inline": celery_run_tasks_inline(),
     }
 
 

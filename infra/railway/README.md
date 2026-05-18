@@ -99,6 +99,18 @@ alembic upgrade head
 
 Use the same production `DATABASE_URL` when running this command.
 
+## Celery / scans stuck at "Queued" (0/16)
+
+Scans enqueue background work via **Celery** (Postgres broker). If only **API + Web** are deployed and `ENVIRONMENT=production`, tasks used to sit in the DB forever with no worker.
+
+**Fix (pick one):**
+
+1. **Recommended:** Add the **worker** service (`Dockerfile.worker`, same env as API). On the **API** service set `CELERY_USE_WORKER=1` so the API does not also run tasks inline.
+2. **API-only (2 services):** Leave `CELERY_USE_WORKER` unset. Current API builds auto-enable inline Celery on Railway (tasks run in the API process after `POST /scans`). Redeploy the API, then start a **new** scan (old scans stay stuck).
+3. **Explicit:** Set `CELERY_TASK_ALWAYS_EAGER=true` on the API service.
+
+Verify after deploy: `GET https://<api>/health` should include `"celery_tasks_inline": true` for API-only, or `false` when using a worker with `CELERY_USE_WORKER=1`.
+
 ## Notes
 
 - Celery is Postgres-backed in this project (no Redis required).
