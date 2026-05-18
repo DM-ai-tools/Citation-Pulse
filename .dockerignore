@@ -1,0 +1,16 @@
+# Used when Railway build context is the monorepo root (backend/Dockerfile).
+.git
+.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.next
+**/node_modules
+apps/web
+frontend
+_MConverter.eu_*
+*.md
+!backend/README.md
+.env
+.env.*

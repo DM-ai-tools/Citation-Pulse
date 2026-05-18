@@ -1,8 +1,5 @@
-# Railway: set service Root Directory to ``backend`` (Settings → Root Directory).
-# Build context must be the ``backend/`` folder so ``COPY src`` exists.
-# If Root Directory is the repo root, use ``backend/Dockerfile.monorepo-root`` instead.
-#
-# Build VMs are memory-limited; exit 137 during pip install = OOM (see infra/railway/README.md).
+# Works whether Railway Root Directory is ``backend`` or the monorepo root (``backend/Dockerfile``).
+# Build VMs are memory-limited; exit 137 on pip install = OOM — see infra/railway/README.md.
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -13,11 +10,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120
 
-COPY pyproject.toml README.md ./
-COPY src ./src
+COPY . /ctx
 
-# Non-editable install (production). Playwright is optional — not needed for LLM scan engines.
-RUN pip install --no-cache-dir --no-compile .
+RUN set -eux; \
+    if [ -f /ctx/backend/pyproject.toml ]; then APP=/ctx/backend; \
+    elif [ -f /ctx/pyproject.toml ]; then APP=/ctx; \
+    else echo "ERROR: no backend/pyproject.toml in build context"; ls -la /ctx; exit 1; fi; \
+    cp "$APP/pyproject.toml" .; \
+    if [ -f "$APP/README.md" ]; then cp "$APP/README.md" .; fi; \
+    cp -r "$APP/src" ./src; \
+    pip install --no-cache-dir --no-compile .
 
 EXPOSE 8000
 

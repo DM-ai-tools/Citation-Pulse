@@ -118,6 +118,7 @@ def root():
 def health():
     return {
         "status": "ok",
+        "version": "2026-05-18-threadpool",
         "openrouter_configured": openrouter_configured(),
         "celery_tasks_inline": celery_run_tasks_inline(),
         "scan_parallel_executor": "threadpool",
