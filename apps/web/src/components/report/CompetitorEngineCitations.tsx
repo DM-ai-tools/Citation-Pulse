@@ -219,7 +219,7 @@ export function CompetitorEngineCitations({
             <p className="mb-2 font-display text-[10px] font-extrabold uppercase tracking-[1.1px] text-tr-teal">
               Prompt
             </p>
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <div className="flex flex-wrap gap-2">
               {prompts.map((p, i) => {
                 const active = p.id === activePromptId;
                 return (
@@ -230,7 +230,7 @@ export function CompetitorEngineCitations({
                     aria-selected={active}
                     onClick={() => onPromptSelect?.(p.id)}
                     className={cn(
-                      "min-w-0 flex-1 rounded-lg border-[1.5px] px-3 py-2.5 text-left font-display text-[12px] font-bold leading-snug transition sm:max-w-[calc(33.333%-0.5rem)] sm:flex-none sm:basis-[calc(33.333%-0.5rem)]",
+                      "min-w-[min(100%,12rem)] flex-1 rounded-lg border-[1.5px] px-3 py-2.5 text-left font-display text-[12px] font-bold leading-snug transition sm:min-w-[10rem] sm:max-w-[calc(50%-0.25rem)] lg:max-w-[calc(25%-0.375rem)]",
                       active
                         ? "border-tr-navy bg-tr-navy text-white shadow-sm"
                         : "border-tr-line bg-[#F8FCFA] text-tr-navy hover:border-brand-primary hover:text-brand-primary",

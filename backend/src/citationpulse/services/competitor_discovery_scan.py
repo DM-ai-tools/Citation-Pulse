@@ -146,21 +146,52 @@ def run_competitor_discovery_for_scan(
     try:
         result = analyze_competitors(req)
     except CompetitorDiscoveryError as exc:
-        _log.warning(
-            "competitor_discovery_for_scan skipped scan_id=%s: %s",
-            scan.id,
-            exc,
-        )
+        _log.warning("competitor_discovery_for_scan failed scan_id=%s: %s", scan.id, exc)
+        set_discovery_status(scan, "failed")
+        db.flush()
         return None
     except Exception:
         _log.exception("competitor_discovery_for_scan failed scan_id=%s", scan.id)
+        set_discovery_status(scan, "failed")
+        db.flush()
         return None
 
     scan.competitor_discovery = result.model_dump(mode="json")
+    set_discovery_status(scan, "done")
     domains = _collect_domains(result)
     _ensure_competitor_brands(db, tenant_id=brand.tenant_id, main_brand=brand, domains=domains)
     db.flush()
     return result
+
+
+def _discovery_params(scan: Scan) -> dict[str, Any]:
+    raw = scan.discovery_params
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def set_discovery_status(scan: Scan, status: str) -> None:
+    """Track background discovery lifecycle in ``discovery_params`` (no migration)."""
+    params = _discovery_params(scan)
+    params["discovery_status"] = status
+    scan.discovery_params = params
+
+
+def competitor_discovery_pending(scan: Scan) -> bool:
+    """True while tiered discovery runs (before engine citation checks)."""
+    if isinstance(scan.competitor_discovery, dict) and scan.competitor_discovery:
+        return False
+    params = _discovery_params(scan)
+    if not params.get("auto_discover", True):
+        return False
+    status = params.get("discovery_status")
+    if status in ("failed", "skipped", "done"):
+        return False
+    return status == "pending"
+
+
+def auto_discover_enabled(scan: Scan) -> bool:
+    params = _discovery_params(scan)
+    return bool(params.get("auto_discover", True))
 
 
 def competitor_discovery_for_report(scan: Scan) -> dict[str, object] | None:

@@ -22,6 +22,7 @@ from citationpulse.models.domain import (
     default_engines,
 )
 from citationpulse.services.events import publish_scan_event
+from citationpulse.services.normalization import registrable_domain
 
 ANON_TENANT_MARKER = "anonymous_scans"
 _log = logging.getLogger(__name__)
@@ -155,9 +156,11 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
     engines_ov = list(scan.engines) if scan.engines else None
     if was_new:
         try:
+            from citationpulse.services.competitor_citation_visibility import reclassify_scan_citations
             from citationpulse.services.competitor_discovery_scan import run_competitor_discovery_for_scan
 
             run_competitor_discovery_for_scan(db, scan)
+            reclassify_scan_citations(db, scan)
             db.commit()
         except Exception:
             _log.exception("competitor_discovery after scan completion failed scan_id=%s", scan_id)
@@ -365,7 +368,17 @@ def build_scan_snapshot(db: Session, scan: Scan) -> dict[str, object]:
         "prompts": [{"id": str(p.id), "text": p.text, "locale": p.locale} for p in prompts],
         "matrix": {"cells": cells},
         "progress": {"per_engine": per_engine},
+        "competitor_discovery": (
+            scan.competitor_discovery if isinstance(scan.competitor_discovery, dict) else None
+        ),
+        "competitor_discovery_pending": _snapshot_discovery_pending(scan),
     }
+
+
+def _snapshot_discovery_pending(scan: Scan) -> bool:
+    from citationpulse.services.competitor_discovery_scan import competitor_discovery_pending
+
+    return competitor_discovery_pending(scan)
 
 
 def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
@@ -458,29 +471,89 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
                 }
             )
 
-    competitor_discovery: dict[str, object] | None = None
-    if scan.status == "completed":
-        from citationpulse.services.competitor_discovery_scan import (
-            competitor_discovery_for_report,
-            run_competitor_discovery_for_scan,
+    from citationpulse.services.competitor_discovery_scan import (
+        competitor_discovery_for_report,
+        competitor_discovery_pending,
+    )
+
+    competitor_discovery = competitor_discovery_for_report(scan) if scan.status == "completed" else None
+
+    user_provided_competitors: list[dict[str, object]] = []
+    params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+    for row in params.get("user_provided_competitors") or []:
+        if isinstance(row, dict) and row.get("domain"):
+            user_provided_competitors.append(
+                {
+                    "domain": str(row["domain"]),
+                    "name": str(row.get("name") or row["domain"]),
+                    "level": "user_provided",
+                    "tier": "You provided",
+                    "source": "user",
+                }
+            )
+    if not user_provided_competitors and competitors:
+        for c in competitors:
+            dom_raw = (c.get("domains") or "").split(",")[0].strip() or c.get("name", "")
+            dom = registrable_domain(
+                dom_raw if str(dom_raw).startswith("http") else f"https://{dom_raw}"
+            )
+            if dom:
+                user_provided_competitors.append(
+                    {
+                        "domain": dom,
+                        "name": str(c.get("name") or dom),
+                        "level": "user_provided",
+                        "tier": "You provided",
+                        "source": "user",
+                    }
+                )
+
+    analysis_competitors: list[dict[str, object]] = []
+    if isinstance(competitor_discovery, dict):
+        for row in competitor_discovery.get("same_level_competitors") or []:
+            if isinstance(row, dict) and row.get("domain"):
+                analysis_competitors.append(
+                    {
+                        "domain": str(row["domain"]),
+                        "name": str(row.get("name") or row["domain"]),
+                        "level": "same_level",
+                        "tier": str(row.get("tier") or ""),
+                        "rank": row.get("rank"),
+                        "source": "analysis",
+                    }
+                )
+        for row in competitor_discovery.get("one_level_above_competitors") or []:
+            if isinstance(row, dict) and row.get("domain"):
+                analysis_competitors.append(
+                    {
+                        "domain": str(row["domain"]),
+                        "name": str(row.get("name") or row["domain"]),
+                        "level": "one_level_above",
+                        "tier": str(row.get("tier") or ""),
+                        "rank": row.get("rank"),
+                        "source": "analysis",
+                    }
+                )
+
+    competitor_citation_visibility: dict[str, object] | None = None
+    brand_for_visibility = db.get(Brand, scan.brand_id) if scan.brand_id else None
+    has_user_competitors = bool(brand_for_visibility and brand_for_visibility.competitors)
+    if scan.status == "completed" and (competitor_discovery or has_user_competitors):
+        from citationpulse.services.competitor_citation_visibility import (
+            build_competitor_citation_visibility,
+            reclassify_scan_citations,
         )
 
-        competitor_discovery = competitor_discovery_for_report(scan)
-        if competitor_discovery is None and scan.discovery_params:
-            params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
-            if params.get("auto_discover", True):
-                try:
-                    result = run_competitor_discovery_for_scan(db, scan)
-                    if result is not None:
-                        db.commit()
-                        competitor_discovery = result.model_dump(mode="json")
-                except Exception:
-                    _log.exception(
-                        "competitor_discovery during build_scan_report failed scan_id=%s",
-                        scan.id,
-                    )
-                else:
-                    competitor_discovery = competitor_discovery_for_report(scan)
+        reclassify_scan_citations(db, scan)
+        snap = build_scan_snapshot(db, scan)
+        competitor_citation_visibility = build_competitor_citation_visibility(
+            db,
+            scan,
+            cells=list((snap.get("matrix") or {}).get("cells") or []),
+            engines=list(snap.get("engines") or []),
+            competitor_discovery=competitor_discovery,
+            prompts=list(snap.get("prompts") or []),
+        )
 
     return {
         **snap,
@@ -488,5 +561,14 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
         "breakdown": breakdown,
         "competitors": competitors,
         "competitor_discovery": competitor_discovery,
+        "competitor_discovery_pending": competitor_discovery_pending(scan),
+        "competitor_discovery_status": (
+            (scan.discovery_params or {}).get("discovery_status")
+            if isinstance(scan.discovery_params, dict)
+            else None
+        ),
+        "competitor_citation_visibility": competitor_citation_visibility,
+        "user_provided_competitors": user_provided_competitors,
+        "analysis_competitors": analysis_competitors,
         "opportunities": opportunities,
     }
