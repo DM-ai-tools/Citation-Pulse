@@ -15,6 +15,7 @@ from citationpulse.schemas.competitors import (
     CompetitorAnalyzeRequest,
     CompetitorDiscoveryResult,
 )
+from citationpulse.services.engine_routing import openai_configured
 from citationpulse.services.llm_router import (
     LLMConfigError,
     LLMProviderError,
@@ -104,9 +105,9 @@ def analyze_competitors(
 ) -> CompetitorDiscoveryResult:
     """Run competitor discovery for ``body.target_website``; returns validated JSON shape."""
     s = settings or get_settings()
-    if not openrouter_configured(s):
+    if not openrouter_configured(s) and not openai_configured(s):
         raise CompetitorDiscoveryError(
-            "OPENROUTER_API_KEY is not configured — competitor discovery requires a web-capable model."
+            "Set OPENROUTER_API_KEY or OPENAI_API_KEY — competitor discovery needs a web-capable model."
         )
 
     target_domain = registrable_domain(body.target_website)
@@ -127,16 +128,31 @@ def analyze_competitors(
         market=body.market,
     )
 
-    model = s.competitor_discovery_model or s.chatgpt_model
     max_tokens = s.competitor_discovery_max_tokens
 
     try:
-        resp = chat_completion_sync(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=0.2,
-        )
+        if openrouter_configured(s):
+            model = s.competitor_discovery_model or s.chatgpt_model
+            resp = chat_completion_sync(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=0.2,
+            )
+        else:
+            import asyncio
+
+            from citationpulse.services.direct_llm import openai_chat_completion
+            from citationpulse.services.engine_routing import effective_openai_model
+
+            resp = asyncio.run(
+                openai_chat_completion(
+                    messages=messages,
+                    settings=s,
+                    model=effective_openai_model(s),
+                    max_tokens=max_tokens,
+                )
+            )
     except LLMConfigError as exc:
         raise CompetitorDiscoveryError(str(exc)) from exc
     except LLMProviderError as exc:

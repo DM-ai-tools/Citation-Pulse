@@ -30,26 +30,26 @@ from citationpulse.services.sov_entities import (
     multi_entity_weekly_share_trend,
     multientity_sov_by_engine,
 )
-from citationpulse.tasks.geo import fan_out_scan_task
+from citationpulse.tasks.geo import start_scan_task
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 _log = logging.getLogger(__name__)
 
 
-def _enqueue_fan_out_scan(scan_id: str) -> None:
+def _enqueue_start_scan(scan_id: str) -> None:
     from citationpulse.celery_app import celery_app
 
     try:
         if celery_app.conf.task_always_eager:
-            fan_out_scan_task.apply(args=(scan_id,))
+            start_scan_task.apply(args=(scan_id,))
         else:
-            fan_out_scan_task.delay(scan_id)
+            start_scan_task.delay(scan_id)
     except Exception:
-        _log.exception("fan_out_scan enqueue failed scan_id=%s; trying inline apply", scan_id)
+        _log.exception("start_scan enqueue failed scan_id=%s; trying inline apply", scan_id)
         try:
-            fan_out_scan_task.apply(args=(scan_id,))
+            start_scan_task.apply(args=(scan_id,))
         except Exception:
-            _log.exception("fan_out_scan inline apply failed scan_id=%s", scan_id)
+            _log.exception("start_scan inline apply failed scan_id=%s", scan_id)
 
 
 SSE_HEADERS = {
@@ -141,7 +141,7 @@ def create_scan(
     db.commit()
     db.refresh(scan)
 
-    background_tasks.add_task(_enqueue_fan_out_scan, str(scan.id))
+    background_tasks.add_task(_enqueue_start_scan, str(scan.id))
     return ScanCreateResponse(scan_id=str(scan.id))
 
 

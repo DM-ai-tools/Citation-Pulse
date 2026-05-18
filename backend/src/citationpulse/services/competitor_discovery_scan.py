@@ -36,8 +36,9 @@ def _locale_to_market(locale: str) -> str:
 
 def discovery_params_from_body(body: Any) -> dict[str, Any]:
     """Serialize optional discovery hints from POST /scans (stored until scan completes)."""
-    return {
-        "auto_discover": bool(getattr(body, "auto_discover_competitors", True)),
+    auto = bool(getattr(body, "auto_discover_competitors", True))
+    params: dict[str, Any] = {
+        "auto_discover": auto,
         "competitor_type": getattr(body, "competitor_type", None),
         "service": (getattr(body, "service", None) or "").strip() or None,
         "niche": (getattr(body, "niche", None) or "").strip() or None,
@@ -47,6 +48,9 @@ def discovery_params_from_body(body: Any) -> dict[str, Any]:
         ],
         "market": _locale_to_market(getattr(body, "locale", "en-AU")),
     }
+    if auto:
+        params["discovery_status"] = "pending"
+    return params
 
 
 def _collect_domains(result: CompetitorDiscoveryResult) -> list[str]:
@@ -125,13 +129,8 @@ def run_competitor_discovery_for_scan(
     if not brand:
         return None
 
+    # Only explicit exclusions — never auto-exclude user-provided competitor brands.
     excluded = list(params.get("excluded_competitors") or [])
-    # Manual competitors entered at scan create are treated as exclusions during discovery.
-    if brand.competitors and not excluded:
-        for cid in brand.competitors:
-            cb = db.get(Brand, cid)
-            if cb and cb.domains:
-                excluded.extend(cb.domains)
 
     req = CompetitorAnalyzeRequest(
         target_website=scan.submitted_url,

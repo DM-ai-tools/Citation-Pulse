@@ -18,7 +18,9 @@ from citationpulse.services.engine_routing import (
     require_openai_key,
 )
 from citationpulse.services.llm_router import (
+    LLMCitation,
     LLMResponse,
+    _URL_RE,
     _extract_citations,
     _extract_text,
 )
@@ -81,6 +83,44 @@ async def openai_chat_completion(
     )
 
 
+def _extract_anthropic_message_citations(payload: dict[str, Any], answer_text: str) -> list[LLMCitation]:
+    """Pull URLs from Anthropic Messages API blocks (web_search_tool_result, etc.)."""
+    out: list[LLMCitation] = []
+    seen: set[str] = set()
+
+    def _push(url: str | None, title: str | None = None, snippet: str | None = None) -> None:
+        if not url or url in seen:
+            return
+        seen.add(url)
+        out.append(LLMCitation(url=url, title=title, snippet=snippet, position=len(out)))
+
+    for block in payload.get("content") or []:
+        if not isinstance(block, dict):
+            continue
+        btype = str(block.get("type") or "")
+        if btype in ("web_search_tool_result", "tool_result"):
+            inner = block.get("content")
+            rows = inner if isinstance(inner, list) else [inner] if isinstance(inner, dict) else []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if row.get("type") in ("web_search_result", "web_search_result_location"):
+                    _push(
+                        str(row.get("url") or row.get("uri") or ""),
+                        row.get("title"),
+                        row.get("snippet") or row.get("encrypted_content"),
+                    )
+                elif row.get("url"):
+                    _push(str(row["url"]), row.get("title"), row.get("snippet"))
+        elif btype == "text":
+            for url in dict.fromkeys(_URL_RE.findall(str(block.get("text") or ""))):
+                _push(url)
+
+    for url in dict.fromkeys(_URL_RE.findall(answer_text or "")):
+        _push(url)
+    return out
+
+
 async def anthropic_chat_completion(
     *,
     messages: list[dict[str, Any]],
@@ -132,7 +172,7 @@ async def anthropic_chat_completion(
         if isinstance(block, dict) and block.get("type") == "text":
             text_parts.append(str(block.get("text") or ""))
     text = "\n".join(p for p in text_parts if p).strip()
-    citations = _extract_citations(payload, text)
+    citations = _extract_anthropic_message_citations(payload, text)
     usage = payload.get("usage") or {}
     return LLMResponse(
         text=text,

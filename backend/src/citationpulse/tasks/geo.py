@@ -313,6 +313,90 @@ def canary_check() -> str:
         db.close()
 
 
+@celery_app.task(name="citationpulse.start_scan")
+def start_scan_task(scan_id: str) -> str:
+    """Run competitor landscape first, then fan out engine citation checks."""
+    db = SessionLocal()
+    try:
+        from citationpulse.services.competitor_discovery_scan import (
+            auto_discover_enabled,
+            run_competitor_discovery_for_scan,
+            set_discovery_status,
+        )
+
+        scan = db.get(Scan, UUID(scan_id))
+        if not scan:
+            return "missing_scan"
+
+        if auto_discover_enabled(scan) and not scan.competitor_discovery:
+            set_discovery_status(scan, "pending")
+            scan.status = "running"
+            db.commit()
+            try:
+                publish_scan_event(scan_id, {"type": "competitor.discovery.started"})
+            except Exception:
+                _log.debug("competitor.discovery.started event failed scan_id=%s", scan_id)
+
+            result = run_competitor_discovery_for_scan(db, scan)
+            if not result and not scan.competitor_discovery:
+                params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+                if params.get("discovery_status") == "pending":
+                    set_discovery_status(scan, "skipped")
+            db.commit()
+            if result is not None or scan.competitor_discovery:
+                try:
+                    publish_scan_event(scan_id, {"type": "competitor.discovery.ready"})
+                except Exception:
+                    _log.debug("competitor.discovery.ready event failed scan_id=%s", scan_id)
+
+        fan_out_scan_task.delay(scan_id)
+        return "ok"
+    except Exception:
+        _log.exception("start_scan_task failed scan_id=%s", scan_id)
+        try:
+            fan_out_scan_task.delay(scan_id)
+        except Exception:
+            _log.exception("fan_out fallback after start_scan failed scan_id=%s", scan_id)
+        return "error"
+    finally:
+        db.close()
+
+
+@celery_app.task(name="citationpulse.competitor_discovery_for_scan")
+def competitor_discovery_for_scan_task(scan_id: str) -> str:
+    """Re-run tiered competitor discovery (manual/backfill)."""
+    db = SessionLocal()
+    try:
+        from citationpulse.services.competitor_citation_visibility import reclassify_scan_citations
+        from citationpulse.services.competitor_discovery_scan import (
+            run_competitor_discovery_for_scan,
+            set_discovery_status,
+        )
+
+        scan = db.get(Scan, UUID(scan_id))
+        if not scan:
+            return "missing_scan"
+        result = run_competitor_discovery_for_scan(db, scan)
+        if not result and not scan.competitor_discovery:
+            params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+            if params.get("discovery_status") == "pending":
+                set_discovery_status(scan, "skipped")
+        if result is not None or scan.competitor_discovery:
+            reclassify_scan_citations(db, scan)
+        db.commit()
+        if result is not None:
+            try:
+                publish_scan_event(scan_id, {"type": "competitor.discovery.ready"})
+            except Exception:
+                _log.debug("competitor.discovery.ready event failed scan_id=%s", scan_id)
+        return "ok"
+    except Exception:
+        _log.exception("competitor_discovery_for_scan_task failed scan_id=%s", scan_id)
+        return "error"
+    finally:
+        db.close()
+
+
 @celery_app.task(name="citationpulse.fan_out_scan")
 def fan_out_scan_task(scan_id: str) -> str:
     db = SessionLocal()

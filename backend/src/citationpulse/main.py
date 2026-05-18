@@ -20,7 +20,9 @@ from citationpulse.core.config import celery_run_tasks_inline, get_settings
 from citationpulse.core.observability import setup_observability
 from citationpulse.db.runtime_bootstrap import ensure_opportunities_schema
 from citationpulse.db.session import get_engine
+from citationpulse.services.engine_routing import anthropic_configured, openai_configured
 from citationpulse.services.llm_router import openrouter_configured
+from citationpulse.services.scans_flow import available_engines
 
 setup_observability()
 
@@ -118,8 +120,12 @@ def root():
 def health():
     return {
         "status": "ok",
-        "version": "2026-05-18-threadpool",
+        "version": "2026-05-19-discovery-claude",
         "openrouter_configured": openrouter_configured(),
+        "openai_configured": openai_configured(),
+        "anthropic_configured": anthropic_configured(),
+        "engines_available": available_engines(),
+        "competitor_discovery_ready": openrouter_configured() or openai_configured(),
         "celery_tasks_inline": celery_run_tasks_inline(),
         "scan_parallel_executor": "threadpool",
         "git_commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA")
