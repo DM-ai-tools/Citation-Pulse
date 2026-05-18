@@ -74,6 +74,18 @@ async def openai_chat_completion(
     )
 
 
+def _as_mapping(node: Any) -> dict[str, Any] | None:
+    if isinstance(node, dict):
+        return node
+    if hasattr(node, "model_dump"):
+        try:
+            dumped = node.model_dump()
+            return dumped if isinstance(dumped, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
 def _extract_anthropic_message_citations(payload: dict[str, Any], answer_text: str) -> list[LLMCitation]:
     """Pull URLs from Anthropic Messages API blocks (web_search_tool_result, etc.)."""
     out: list[LLMCitation] = []
@@ -85,27 +97,34 @@ def _extract_anthropic_message_citations(payload: dict[str, Any], answer_text: s
         seen.add(url)
         out.append(LLMCitation(url=url, title=title, snippet=snippet, position=len(out)))
 
-    for block in payload.get("content") or []:
-        if not isinstance(block, dict):
-            continue
-        btype = str(block.get("type") or "")
-        if btype in ("web_search_tool_result", "tool_result"):
-            inner = block.get("content")
-            rows = inner if isinstance(inner, list) else [inner] if isinstance(inner, dict) else []
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                if row.get("type") in ("web_search_result", "web_search_result_location"):
-                    _push(
-                        str(row.get("url") or row.get("uri") or ""),
-                        row.get("title"),
-                        row.get("snippet") or row.get("encrypted_content"),
-                    )
-                elif row.get("url"):
-                    _push(str(row["url"]), row.get("title"), row.get("snippet"))
-        elif btype == "text":
-            for url in dict.fromkeys(_URL_RE.findall(str(block.get("text") or ""))):
+    def _walk(node: Any) -> None:
+        mapping = _as_mapping(node)
+        if mapping is None:
+            if isinstance(node, list):
+                for item in node:
+                    _walk(item)
+            return
+        btype = str(mapping.get("type") or "")
+        if btype in ("web_search_result", "web_search_result_location") or mapping.get("url"):
+            _push(
+                str(mapping.get("url") or mapping.get("uri") or ""),
+                mapping.get("title") if isinstance(mapping.get("title"), str) else None,
+                mapping.get("snippet")
+                if isinstance(mapping.get("snippet"), str)
+                else mapping.get("encrypted_content")
+                if isinstance(mapping.get("encrypted_content"), str)
+                else None,
+            )
+        if btype == "text":
+            for url in dict.fromkeys(_URL_RE.findall(str(mapping.get("text") or ""))):
                 _push(url)
+        for key in ("content", "results", "citations"):
+            child = mapping.get(key)
+            if child is not None:
+                _walk(child)
+
+    for block in payload.get("content") or []:
+        _walk(block)
 
     for url in dict.fromkeys(_URL_RE.findall(answer_text or "")):
         _push(url)
@@ -134,22 +153,25 @@ async def anthropic_chat_completion(
         "max_tokens": max_tokens or s.llm_max_tokens,
         "messages": [{"role": "user", "content": user_text}],
     }
-    if web_search:
-        kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}]
-
     t0 = time.perf_counter()
-    try:
-        msg = await client.messages.create(**kwargs)
-    except Exception as exc:  # noqa: BLE001
-        if web_search:
-            _log.debug("anthropic web_search failed, retrying without tool: %s", exc)
-            kwargs.pop("tools", None)
+    msg = None
+    last_exc: Exception | None = None
+    if web_search:
+        for tool_type in ("web_search_20250305", "web_search_20260209"):
             try:
+                kwargs["tools"] = [{"type": tool_type, "name": "web_search", "max_uses": 3}]
                 msg = await client.messages.create(**kwargs)
-            except Exception as exc2:  # noqa: BLE001
-                status = getattr(exc2, "status_code", None) or 502
-                raise LLMProviderError(int(status) if isinstance(status, int) else 502, str(exc2)) from exc2
-        else:
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                _log.debug("anthropic web_search tool %s failed: %s", tool_type, exc)
+        if msg is None and last_exc is not None:
+            _log.warning("anthropic web_search unavailable, retrying without tool: %s", last_exc)
+            kwargs.pop("tools", None)
+    if msg is None:
+        try:
+            msg = await client.messages.create(**kwargs)
+        except Exception as exc:  # noqa: BLE001
             status = getattr(exc, "status_code", None) or 502
             raise LLMProviderError(int(status) if isinstance(status, int) else 502, str(exc)) from exc
 
@@ -160,6 +182,12 @@ async def anthropic_chat_completion(
             text_parts.append(str(block.get("text") or ""))
     text = "\n".join(p for p in text_parts if p).strip()
     citations = _extract_anthropic_message_citations(payload, text)
+    if not citations and text:
+        _log.warning(
+            "anthropic direct: answer text (%s chars) but zero extractable citations (model=%s)",
+            len(text),
+            model_name,
+        )
     usage = payload.get("usage") or {}
     return LLMResponse(
         text=text,

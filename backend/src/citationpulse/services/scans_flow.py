@@ -226,7 +226,14 @@ def cell_status_for_run(db: Session, run: EngineRun) -> dict[str, object]:
     if run.status == RunStatus.RUNNING.value:
         return {**base, "status": "running", "citationsCount": 0, "citations": []}
     if run.status == RunStatus.ERROR.value:
-        return {**base, "status": "none", "citationsCount": 0, "citations": []}
+        err = (run.error_message or "").strip()
+        return {
+            **base,
+            "status": "error",
+            "citationsCount": 0,
+            "citations": [],
+            "errorMessage": err[:500] if err else None,
+        }
     if run.status != RunStatus.OK.value:
         return {**base, "status": "none", "citationsCount": 0, "citations": []}
 
@@ -288,40 +295,20 @@ def publish_cell_update(db: Session, run: EngineRun) -> None:
     publish_scan_event(str(run.scan_id), ev)
 
 
-def _engines_with_visible_results(
-    runs: list[EngineRun],
+def _engines_for_report_columns(
     requested: list[str],
     scan_status: str,
 ) -> list[str]:
-    """Engines to render in the UI.
+    """Column engines for the scan matrix / snapshot.
 
     While the scan is running we keep the full requested list so the user sees
-    every column animate. Once the scan reaches a terminal state, we drop any
-    engine whose runs *all* errored (e.g. OpenAI quota exhausted, Perplexity
-    bad key) so the report only shows engines that returned real data.
-
-    Engines that returned `ok` but zero citations are KEPT — that's a real
-    "the brand isn't cited there yet" answer and is meaningful product info.
+    every column animate. Once the scan is terminal, we still return the full
+    requested list so columns match what was scheduled (including engines whose
+    runs all errored — those cells use ``status: "error"`` in ``cell_status_for_run``).
     """
     if scan_status not in {"completed", "failed"}:
         return requested
-
-    runs_by_engine: dict[str, list[EngineRun]] = {}
-    for r in runs:
-        key = r.engine.value if isinstance(r.engine, EngineType) else str(r.engine)
-        runs_by_engine.setdefault(key, []).append(r)
-
-    kept: list[str] = []
-    for e in requested:
-        engine_runs = runs_by_engine.get(e, [])
-        if not engine_runs:
-            continue  # engine was never scheduled — drop
-        # Keep if at least one run reached `ok`. All-errored engines are hidden.
-        if any(r.status == RunStatus.OK.value for r in engine_runs):
-            kept.append(e)
-    # Defensive fall-back: if filtering left zero, surface all requested so the
-    # UI doesn't go blank (lets the user see error states).
-    return kept or requested
+    return list(requested)
 
 
 def build_scan_snapshot(db: Session, scan: Scan) -> dict[str, object]:
@@ -330,7 +317,7 @@ def build_scan_snapshot(db: Session, scan: Scan) -> dict[str, object]:
     runs = list(db.scalars(select(EngineRun).where(EngineRun.scan_id == scan.id)).all())
 
     requested_engines = list(scan.engines) if scan.engines else default_engines()
-    visible_engines = _engines_with_visible_results(runs, requested_engines, scan.status)
+    visible_engines = _engines_for_report_columns(requested_engines, scan.status)
     visible_set = set(visible_engines)
 
     cells: list[dict[str, object]] = []

@@ -120,7 +120,7 @@ def root():
 def health():
     return {
         "status": "ok",
-        "version": "2026-05-19-discovery-claude",
+        "version": "2026-05-19-claude-columns",
         "openrouter_configured": openrouter_configured(),
         "openai_configured": openai_configured(),
         "anthropic_configured": anthropic_configured(),

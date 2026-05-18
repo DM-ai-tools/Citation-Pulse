@@ -25,7 +25,7 @@ from citationpulse.models.domain import (
 from citationpulse.services.embeddings import embed_texts
 from citationpulse.core.config import get_settings
 from citationpulse.services.engine_routing import engine_route, route_label
-from citationpulse.services.llm_router import LLMProviderError
+from citationpulse.services.llm_router import LLMConfigError, LLMProviderError
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.ownership import classify_domain
 from citationpulse.services.sentiment import classify_snippet
@@ -177,6 +177,16 @@ def _execute_engine_run(run_id: str) -> str:
         ctx = {"run_id": run_id, "tenant_id": str(run.tenant_id), "brand_id": str(brand.id)}
         try:
             resp = asyncio.run(adapter.run(prompt.text, locale=prompt.locale, run_ctx=ctx))
+        except LLMConfigError as exc:
+            run.status = RunStatus.ERROR.value
+            run.error_message = str(exc)[:4000]
+            run.finished_at = datetime.now(timezone.utc)
+            db.commit()
+            if run.scan_id:
+                db.refresh(run)
+                publish_cell_update(db, run)
+                maybe_complete_scan(db, run.scan_id)
+            return "error"
         except Exception as exc:  # noqa: BLE001
             run.status = RunStatus.ERROR.value
             run.error_message = _provider_error_message(exc, engine_key)
