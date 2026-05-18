@@ -237,7 +237,12 @@ def run_engines_parallel_task(run_ids: list[str]) -> str:
         async with sem:
             return await asyncio.to_thread(_execute_engine_run, rid)
 
-    results = asyncio.run(asyncio.gather(*(_one(rid) for rid in run_ids), return_exceptions=True))
+    async def _run_all():
+        # gather() must run inside asyncio.run()'s loop — calling gather() as asyncio.run()'s
+        # argument runs it in the AnyIO worker thread with no loop (uvicorn + uvloop).
+        return await asyncio.gather(*(_one(rid) for rid in run_ids), return_exceptions=True)
+
+    results = asyncio.run(_run_all())
     errors = [r for r in results if isinstance(r, Exception)]
     if errors:
         _log.warning("run_engines_parallel had %s errors", len(errors))

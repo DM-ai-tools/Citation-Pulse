@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from pydantic import field_validator
@@ -229,3 +230,33 @@ def effective_celery_result_backend(s: Settings | None = None) -> str:
     if s.celery_result_backend:
         return s.celery_result_backend
     return f"db+{_to_sqla_url(s.database_url)}"
+
+
+def _is_railway_deploy() -> bool:
+    return any(
+        os.environ.get(k)
+        for k in (
+            "RAILWAY_ENVIRONMENT",
+            "RAILWAY_ENVIRONMENT_NAME",
+            "RAILWAY_PROJECT_ID",
+            "RAILWAY_SERVICE_ID",
+            "RAILWAY_SERVICE_NAME",
+        )
+    )
+
+
+def celery_run_tasks_inline(s: Settings | None = None) -> bool:
+    s = s or get_settings()
+    eager_env = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "").strip().lower()
+    use_worker = os.environ.get("CELERY_USE_WORKER", "").strip().lower() in ("1", "true", "yes")
+    if eager_env in ("1", "true", "yes"):
+        return True
+    if eager_env in ("0", "false", "no"):
+        return False
+    if use_worker:
+        return False
+    if s.environment.lower() in ("development", "dev", "local"):
+        return True
+    if _is_railway_deploy():
+        return True
+    return False

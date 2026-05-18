@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
-
 from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_process_init
 
 from citationpulse.core.config import (
+    celery_run_tasks_inline,
     effective_celery_broker_url,
     effective_celery_result_backend,
     get_settings,
@@ -20,12 +19,7 @@ celery_app = Celery(
     backend=effective_celery_result_backend(_settings),
 )
 
-_use_worker = os.environ.get("CELERY_USE_WORKER", "").lower() in ("1", "true", "yes")
-_eager_env = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "").strip().lower()
-_dev = _settings.environment.lower() in ("development", "dev", "local")
-_task_always_eager = _eager_env in ("1", "true", "yes") or (
-    _dev and not _use_worker and _eager_env not in ("0", "false", "no")
-)
+_task_always_eager = celery_run_tasks_inline(_settings)
 
 celery_app.conf.update(
     task_track_started=True,

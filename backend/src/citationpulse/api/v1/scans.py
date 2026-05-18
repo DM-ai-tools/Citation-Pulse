@@ -37,10 +37,19 @@ _log = logging.getLogger(__name__)
 
 
 def _enqueue_fan_out_scan(scan_id: str) -> None:
+    from citationpulse.celery_app import celery_app
+
     try:
-        fan_out_scan_task.delay(scan_id)
+        if celery_app.conf.task_always_eager:
+            fan_out_scan_task.apply(args=(scan_id,))
+        else:
+            fan_out_scan_task.delay(scan_id)
     except Exception:
-        _log.exception("fan_out_scan failed scan_id=%s", scan_id)
+        _log.exception("fan_out_scan enqueue failed scan_id=%s; trying inline apply", scan_id)
+        try:
+            fan_out_scan_task.apply(args=(scan_id,))
+        except Exception:
+            _log.exception("fan_out_scan inline apply failed scan_id=%s", scan_id)
 
 
 SSE_HEADERS = {
