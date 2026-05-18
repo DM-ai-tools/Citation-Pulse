@@ -111,6 +111,24 @@ Scans enqueue background work via **Celery** (Postgres broker). If only **API + 
 
 Verify after deploy: `GET https://<api>/health` should include `"celery_tasks_inline": true` for API-only, or `false` when using a worker with `CELERY_USE_WORKER=1`.
 
+## Build failed: `"/src": not found` during `COPY src`
+
+Railway is building with the **repo root** as context but the Dockerfile expects files under **`backend/`**.
+
+**Fix (recommended):** In the backend service → **Settings** → **Root Directory** → set:
+
+```text
+backend
+```
+
+Leave **Dockerfile path** as `backend/Dockerfile` (or `Dockerfile`). Redeploy with **clear build cache**.
+
+**Alternative:** Keep Root Directory at repo root (`.`) and set Dockerfile path to:
+
+```text
+backend/Dockerfile.monorepo-root
+```
+
 ## Build failed: `exit code 137` during `pip install`
 
 Railway build containers often have limited RAM. **137 = process killed (out of memory).**
@@ -142,9 +160,10 @@ The backend `Dockerfile` avoids upgrading pip in a separate layer and omits Play
 
 ### Recommended 3-service layout
 
-| Railway service | Root directory | Healthcheck |
-|-----------------|----------------|-------------|
-| API (backend)   | `backend` or `apps/api` | `/health` |
+| Railway service | Root directory | Dockerfile path | Healthcheck |
+|-----------------|----------------|-----------------|-------------|
+| API (backend)   | **`backend`** (required) | `backend/Dockerfile` | `/health` |
+| API (alt)       | `apps/api` | `apps/api/Dockerfile` | `/health` |
 | Web (frontend)  | `apps/web`     | `/` |
 | Postgres        | (plugin)       | — |
 

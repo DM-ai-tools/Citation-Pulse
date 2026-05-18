@@ -1,5 +1,8 @@
-# Railway build VMs are memory-limited (~512MB–1GB). Exit 137 during `pip install` = OOM.
-# Do not run `pip install --upgrade pip` here; use the image pip and install the app once.
+# Railway: set service Root Directory to ``backend`` (Settings → Root Directory).
+# Build context must be the ``backend/`` folder so ``COPY src`` exists.
+# If Root Directory is the repo root, use ``backend/Dockerfile.monorepo-root`` instead.
+#
+# Build VMs are memory-limited; exit 137 during pip install = OOM (see infra/railway/README.md).
 FROM python:3.12-slim
 
 WORKDIR /app

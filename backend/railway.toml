@@ -1,4 +1,5 @@
-# Railway config when this service's root directory is ``backend/``.
+# Railway: set the service Root Directory to ``backend`` in the dashboard (not repo root).
+# Dockerfile path can be ``backend/Dockerfile`` (from repo) or ``Dockerfile`` (under that root).
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
