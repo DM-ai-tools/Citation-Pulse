@@ -14,7 +14,9 @@ from citationpulse.api.v1.scans import router as scans_router
 from citationpulse.api.v1.operator import router as operator_router
 from citationpulse.api.v1.partner import router as partner_router
 from citationpulse.api.webhooks.stripe import router as stripe_router
-from citationpulse.core.config import get_settings
+import os
+
+from citationpulse.core.config import celery_run_tasks_inline, get_settings
 from citationpulse.core.observability import setup_observability
 from citationpulse.db.runtime_bootstrap import ensure_opportunities_schema
 from citationpulse.db.session import get_engine
@@ -117,6 +119,11 @@ def health():
     return {
         "status": "ok",
         "openrouter_configured": openrouter_configured(),
+        "celery_tasks_inline": celery_run_tasks_inline(),
+        "scan_parallel_executor": "threadpool",
+        "git_commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("RAILWAY_GIT_COMMIT")
+        or None,
     }
 
 

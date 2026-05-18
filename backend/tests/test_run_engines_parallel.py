@@ -1,8 +1,7 @@
-"""run_engines_parallel_task must not call asyncio.gather outside a running loop."""
+"""run_engines_parallel_task uses a thread pool (no asyncio.gather in the Celery task)."""
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 
@@ -18,19 +17,17 @@ def test_run_engines_parallel_empty():
     assert geo.run_engines_parallel_task.run([]) == "empty"
 
 
-def test_gather_wrapped_in_asyncio_run(monkeypatch):
-    calls: list[str] = []
+def test_runs_all_ids(monkeypatch):
+    executed: list[str] = []
 
-    def fake_run(coro):
-        calls.append("run")
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+    def fake_execute(rid: str) -> str:
+        executed.append(rid)
+        return "ok"
 
-    monkeypatch.setattr(geo.asyncio, "run", fake_run)
-    monkeypatch.setattr(geo, "_execute_engine_run", lambda rid: "ok")
-
-    geo.run_engines_parallel_task.run(["00000000-0000-4000-8000-000000000001"])
-    assert calls == ["run"]
+    monkeypatch.setattr(geo, "_execute_engine_run", fake_execute)
+    ids = [
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+    ]
+    assert geo.run_engines_parallel_task.run(ids) == "ok"
+    assert sorted(executed) == sorted(ids)

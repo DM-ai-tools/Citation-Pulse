@@ -226,26 +226,25 @@ def run_engine_task(run_id: str) -> str:
 
 @celery_app.task(name="citationpulse.run_engines_parallel")
 def run_engines_parallel_task(run_ids: list[str]) -> str:
-    """Execute all engine runs for a scan concurrently (asyncio + thread pool)."""
+    """Execute all engine runs concurrently via threads (safe in Celery eager + uvicorn/AnyIO)."""
     if not run_ids:
         return "empty"
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     settings = get_settings()
     limit = max(1, settings.scan_parallel_max_concurrent)
-    sem = asyncio.Semaphore(limit)
-
-    async def _one(rid: str) -> str:
-        async with sem:
-            return await asyncio.to_thread(_execute_engine_run, rid)
-
-    async def _run_all():
-        # gather() must run inside asyncio.run()'s loop — calling gather() as asyncio.run()'s
-        # argument runs it in the AnyIO worker thread with no loop (uvicorn + uvloop).
-        return await asyncio.gather(*(_one(rid) for rid in run_ids), return_exceptions=True)
-
-    results = asyncio.run(_run_all())
-    errors = [r for r in results if isinstance(r, Exception)]
+    errors = 0
+    with ThreadPoolExecutor(max_workers=limit) as pool:
+        futures = {pool.submit(_execute_engine_run, rid): rid for rid in run_ids}
+        for fut in as_completed(futures):
+            rid = futures[fut]
+            try:
+                fut.result()
+            except Exception:
+                errors += 1
+                _log.exception("parallel engine run failed run_id=%s", rid)
     if errors:
-        _log.warning("run_engines_parallel had %s errors", len(errors))
+        _log.warning("run_engines_parallel had %s errors", errors)
     return "ok"
 
 
