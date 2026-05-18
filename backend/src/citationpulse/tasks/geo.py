@@ -23,6 +23,8 @@ from citationpulse.models.domain import (
     default_engines,
 )
 from citationpulse.services.embeddings import embed_texts
+from citationpulse.core.config import get_settings
+from citationpulse.services.engine_routing import engine_route, route_label
 from citationpulse.services.llm_router import LLMProviderError
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.ownership import classify_domain
@@ -113,8 +115,29 @@ def normalise_citations_for_run(db: Session, run: EngineRun) -> bool:
     return True
 
 
-@celery_app.task(name="citationpulse.run_engine")
-def run_engine_task(run_id: str) -> str:
+def _provider_error_message(exc: Exception, engine_key: str) -> str:
+    route = engine_route(engine_key)
+    label = route_label(route)
+    if isinstance(exc, LLMProviderError) and exc.status_code == 401:
+        if route == "openai_direct":
+            return (
+                "OpenAI rejected the request (HTTP 401). Set OPENAI_API_KEY in .env. "
+                f"Details: {exc.body[:400]}"
+            )
+        if route == "anthropic_direct":
+            return (
+                "Anthropic rejected the request (HTTP 401). Set ANTHROPIC_API_KEY in .env. "
+                f"Details: {exc.body[:400]}"
+            )
+        return (
+            "OpenRouter rejected the request (HTTP 401). Set OPENROUTER_API_KEY for Gemini/Perplexity. "
+            f"Details: {exc.body[:400]}"
+        )
+    return f"{label}: {exc}"[:4000]
+
+
+def _execute_engine_run(run_id: str) -> str:
+    """Run one engine job (sync). Used by single-run and parallel batch tasks."""
     db = SessionLocal()
     try:
         run = db.get(EngineRun, UUID(run_id))
@@ -127,6 +150,22 @@ def run_engine_task(run_id: str) -> str:
         if not brand:
             return "missing_brand"
 
+        engine_key = run.engine.value if hasattr(run.engine, "value") else str(run.engine)
+        if engine_route(engine_key) == "unconfigured":
+            run.status = RunStatus.ERROR.value
+            run.error_message = (
+                f"No API key configured for {engine_key} "
+                f"(route: {route_label('unconfigured')}). "
+                "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, and/or OPENROUTER_API_KEY."
+            )[:4000]
+            run.finished_at = datetime.now(timezone.utc)
+            db.commit()
+            if run.scan_id:
+                db.refresh(run)
+                publish_cell_update(db, run)
+                maybe_complete_scan(db, run.scan_id)
+            return "error"
+
         run.status = RunStatus.RUNNING.value
         run.started_at = datetime.now(timezone.utc)
         db.commit()
@@ -137,27 +176,16 @@ def run_engine_task(run_id: str) -> str:
         adapter = build_adapter(run.engine)
         ctx = {"run_id": run_id, "tenant_id": str(run.tenant_id), "brand_id": str(brand.id)}
         try:
-            resp = asyncio.run(
-                adapter.run(prompt.text, locale=prompt.locale, run_ctx=ctx),
-            )
+            resp = asyncio.run(adapter.run(prompt.text, locale=prompt.locale, run_ctx=ctx))
         except Exception as exc:  # noqa: BLE001
             run.status = RunStatus.ERROR.value
-            msg = str(exc)
-            if isinstance(exc, LLMProviderError) and exc.status_code == 401:
-                msg = (
-                    "OpenRouter rejected the request (HTTP 401). "
-                    "Set OPENROUTER_API_KEY on Railway for this service (same value as local .env). "
-                    f"Details: {exc.body[:400]}"
-                )
-            run.error_message = msg[:4000]
+            run.error_message = _provider_error_message(exc, engine_key)
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
             if run.scan_id:
                 db.refresh(run)
                 publish_cell_update(db, run)
                 maybe_complete_scan(db, run.scan_id)
-            # Do not Celery-retry here: eager mode runs inside Starlette BackgroundTasks and
-            # `raise self.retry` surfaces as "Exception in ASGI application" after POST /scans.
             _log.warning("run_engine failed run_id=%s engine=%s: %s", run_id, run.engine, exc)
             return "error"
 
@@ -189,6 +217,31 @@ def run_engine_task(run_id: str) -> str:
         return "ok"
     finally:
         db.close()
+
+
+@celery_app.task(name="citationpulse.run_engine")
+def run_engine_task(run_id: str) -> str:
+    return _execute_engine_run(run_id)
+
+
+@celery_app.task(name="citationpulse.run_engines_parallel")
+def run_engines_parallel_task(run_ids: list[str]) -> str:
+    """Execute all engine runs for a scan concurrently (asyncio + thread pool)."""
+    if not run_ids:
+        return "empty"
+    settings = get_settings()
+    limit = max(1, settings.scan_parallel_max_concurrent)
+    sem = asyncio.Semaphore(limit)
+
+    async def _one(rid: str) -> str:
+        async with sem:
+            return await asyncio.to_thread(_execute_engine_run, rid)
+
+    results = asyncio.run(asyncio.gather(*(_one(rid) for rid in run_ids), return_exceptions=True))
+    errors = [r for r in results if isinstance(r, Exception)]
+    if errors:
+        _log.warning("run_engines_parallel had %s errors", len(errors))
+    return "ok"
 
 
 @celery_app.task(name="citationpulse.normalise")
@@ -270,9 +323,7 @@ def fan_out_scan_task(scan_id: str) -> str:
         eng_list = list(scan.engines) if scan.engines else default_engines()
         scan.status = "running"
         db.commit()
-        n = max(1, len(prompts) * len(eng_list))
-        publish_scan_event(scan_id, {"type": "scan.eta", "etaSeconds": min(900, n * 40)})
-
+        run_ids: list[str] = []
         for p in prompts:
             for e in eng_list:
                 try:
@@ -288,7 +339,24 @@ def fan_out_scan_task(scan_id: str) -> str:
                 )
                 db.add(run)
                 db.commit()
-                run_engine_task.delay(str(run.id))
+                run_ids.append(str(run.id))
+
+        if not run_ids:
+            return "no_runs"
+        settings = get_settings()
+        parallel = settings.scan_parallel_engines and len(run_ids) > 1
+        n = len(run_ids)
+        if parallel:
+            eta_factor = max(1, (n + settings.scan_parallel_max_concurrent - 1) // settings.scan_parallel_max_concurrent)
+            eta_seconds = min(900, 20 + eta_factor * 25)
+        else:
+            eta_seconds = min(900, n * 40)
+        publish_scan_event(scan_id, {"type": "scan.eta", "etaSeconds": eta_seconds})
+        if parallel:
+            run_engines_parallel_task.delay(run_ids)
+        else:
+            for rid in run_ids:
+                run_engine_task.delay(rid)
         return "enqueued"
     finally:
         db.close()
@@ -336,6 +404,15 @@ def daily_beat() -> str:
 
 @celery_app.task(name="citationpulse.detect_opportunities")
 def detect_opportunities_task(brand_id: str | None = None) -> str:
+    """Nightly Top Gap Opportunities detection.
+
+    Runs AFTER normalise + score_cells in the pipeline:
+        normalise → score_cells → detect_opportunities
+
+    The task is idempotent: it upserts opportunity rows keyed by
+    (brand_id, prompt_id, gap_type, scope) and marks rows that no longer
+    match any gap pattern as ``status='resolved'`` (audit trail preserved).
+    """
     from citationpulse.services.opportunities import detect_opportunities_for_brand
 
     db = SessionLocal()
@@ -347,5 +424,58 @@ def detect_opportunities_task(brand_id: str | None = None) -> str:
         for b in brands:
             detect_opportunities_for_brand(db, b.id)
         return f"ok:{len(brands)}"
+    finally:
+        db.close()
+
+
+@celery_app.task(name="citationpulse.refresh_demand", bind=True, max_retries=2)
+def refresh_demand_task(
+    self,  # type: ignore[no-untyped-def]
+    brand_id: str | None = None,
+    max_age_days: int = 7,
+    batch_size: int = 200,
+) -> str:
+    """Weekly demand refresh — runs the 4-step fallback for prompts >7d old.
+
+    DataForSEO lookups are cached in Redis for 7 days (per (variant, locale)),
+    so re-runs within the same week are cheap even at scale.
+
+    Arguments:
+        brand_id:     optional UUID to scope the refresh to a single brand.
+        max_age_days: how old ``demand_refreshed_at`` has to be before we
+                      consider the prompt stale. Default = 7d matches the
+                      Redis TTL on DataForSEO lookups.
+        batch_size:   how many prompts to process per commit. Lower this if
+                      worker memory becomes an issue on huge tenants.
+    """
+    from citationpulse.services.demand import (
+        refresh_demand_for_prompts,
+        stale_prompt_ids,
+    )
+    from citationpulse.models.domain import Prompt as PromptModel
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    try:
+        if brand_id:
+            stmt = select(PromptModel.id).where(
+                PromptModel.brand_id == UUID(brand_id),
+                PromptModel.enabled.is_(True),
+            )
+            ids = list(db.scalars(stmt).all())
+        else:
+            ids = stale_prompt_ids(db, max_age_days=int(max_age_days))
+
+        total = 0
+        for i in range(0, len(ids), int(batch_size)):
+            chunk = ids[i : i + int(batch_size)]
+            total += refresh_demand_for_prompts(db, chunk)
+        return f"ok:{total}"
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("refresh_demand failed: %s; retry=%s", exc, self.request.retries)
+        try:
+            raise self.retry(exc=exc, countdown=60 * (self.request.retries + 1))
+        except Exception:
+            return "error"
     finally:
         db.close()

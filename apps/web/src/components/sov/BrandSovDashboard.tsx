@@ -299,17 +299,29 @@ export function BrandSovDashboard(props: {
                           <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-md">
                             <p className="font-semibold text-slate-800">{typeof iso === "string" ? iso : ""}</p>
                             <ul className="mt-1.5 space-y-0.5 text-slate-600">
-                              {payload.map((p) => {
-                                const key = String(p.dataKey ?? "");
-                                const ent = weekly.entities.find((e) => e.entity_id === key);
-                                const label = ent?.name ?? key;
-                                return (
-                                  <li key={key}>
-                                    <span className="font-medium text-slate-800">{label}</span>
-                                    <span className="ml-1.5 tabular-nums font-semibold text-slate-900">{p.value}%</span>
-                                  </li>
-                                );
-                              })}
+                              {(() => {
+                                const seen = new Set<string>();
+                                return payload
+                                  .filter((p) => {
+                                    const dataKey = String(p.dataKey ?? "");
+                                    if (!dataKey || seen.has(dataKey)) return false;
+                                    seen.add(dataKey);
+                                    return true;
+                                  })
+                                  .map((p) => {
+                                    const dataKey = String(p.dataKey ?? "");
+                                    const ent = weekly.entities.find((e) => e.entity_id === dataKey);
+                                    const label = ent?.name ?? dataKey;
+                                    return (
+                                      <li key={dataKey}>
+                                        <span className="font-medium text-slate-800">{label}</span>
+                                        <span className="ml-1.5 tabular-nums font-semibold text-slate-900">
+                                          {p.value}%
+                                        </span>
+                                      </li>
+                                    );
+                                  });
+                              })()}
                             </ul>
                           </div>
                         );

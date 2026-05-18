@@ -11,6 +11,12 @@ class ScanCreate(BaseModel):
     prompts: Annotated[list[str], Field(min_length=1, max_length=8)]
     locale: str = Field(default="en-US", max_length=32)
     engines: list[str] | None = None
+    auto_discover_competitors: bool = True
+    competitor_type: str | None = Field(None, max_length=64)
+    service: str | None = Field(None, max_length=512)
+    niche: str | None = Field(None, max_length=512)
+    location: str | None = Field(None, max_length=256)
+    excluded_competitors: Annotated[list[str], Field(default_factory=list, max_length=50)]
 
     @field_validator("prompts")
     @classmethod

@@ -184,7 +184,20 @@ def _extract_citations(payload: dict[str, Any], answer_text: str) -> list[LLMCit
         seen.add(url)
         out.append(LLMCitation(url=url, title=title, snippet=snippet, position=len(out)))
 
-    # 0) Optional plugin / search metadata at response root (varies by provider)
+    # 0) Anthropic Messages API (direct): citations live on text blocks at payload root.
+    for block in payload.get("content") or []:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            for c in block.get("citations") or []:
+                if isinstance(c, dict) and c.get("url"):
+                    _push(
+                        str(c["url"]),
+                        c.get("title"),
+                        c.get("cited_text") or c.get("snippet"),
+                    )
+
+    # 0b) Optional plugin / search metadata at response root (varies by provider)
     for row in payload.get("search_results") or []:
         if isinstance(row, dict) and row.get("url"):
             _push(str(row["url"]), row.get("title"), row.get("snippet"))

@@ -26,6 +26,13 @@ from citationpulse.models.domain import (
     Scan,
     default_engines,
 )
+from citationpulse.services.demand import (
+    DemandResult,
+    bucket_from_volume,
+    persist_demand_to_prompt,
+    resolve_demand,
+    score_from_volume,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -186,16 +193,45 @@ def opportunity_score(
     gap_type: str,
     competitor_cites: int,
     consecutive_gap_runs: int,
+    demand_score: float | None = None,
+    demand_bucket: str | None = None,
 ) -> float:
+    """Final 0..1 opportunity score.
+
+    Formula (per spec):
+        0.40 * demand
+        0.30 * gap
+        0.20 * competitor citation share
+        0.10 * persistence (consecutive gap runs)
+
+    ``demand`` comes from the precomputed ``Prompt.demand_score`` column.
+    If the caller doesn't have a resolved demand value yet (older rows,
+    detector running before the first refresh_demand pass) we fall back
+    to ``log10(est_volume)/5`` so historical rows keep grading sensibly.
+
+    Special rule: ``gap_type == "absent_all"`` AND ``demand_bucket == "high"``
+    forces grade A (minimum score = 0.71). High-volume absences always win
+    a slot at the top of the dashboard.
+    """
     n_eng = max(len(latest_states), 1)
-    vol = min(math.log10(max(est_volume or 1, 1)) / 5.0, 1.0)
+    # Resolve demand component: prefer precomputed demand_score over raw volume.
+    if demand_score is not None:
+        demand = max(0.0, min(float(demand_score), 1.0))
+    else:
+        demand = score_from_volume(est_volume)
     miss = sum(1 for c in latest_states.values() if c == MISSING)
     comp = sum(1 for c in latest_states.values() if c == COMPETITOR_ONLY)
     gap = (miss + 0.5 * comp) / float(n_eng)
     cscore = min(competitor_cites / float(n_eng), 1.0)
     persist = min(consecutive_gap_runs / 7.0, 1.0)
-    s = 0.40 * vol + 0.30 * gap + 0.20 * cscore + 0.10 * persist
-    if gap_type == "absent_all" and (est_volume or 0) > 5000:
+    s = 0.40 * demand + 0.30 * gap + 0.20 * cscore + 0.10 * persist
+
+    # New rule: bucket-based grade A floor for absent_all.
+    bucket = (demand_bucket or bucket_from_volume(est_volume) or "").lower()
+    if gap_type == "absent_all" and bucket == "high":
+        s = max(s, 0.71)
+    # Legacy rule (kept for back-compat): absolute volume override.
+    elif gap_type == "absent_all" and (est_volume or 0) > 5000:
         s = max(s, 0.71)
     return round(float(s), 3)
 
@@ -210,6 +246,24 @@ def grade_from_score(s: float) -> str:
 
 def heat_from_grade(g: str) -> str:
     return {"A": "HOT", "B": "WARM", "C": "COOL"}.get(g, "COOL")
+
+
+def demand_pill_from_bucket(bucket: str | None) -> str:
+    """Map a demand bucket onto the UI pill copy (HIGH/MEDIUM/LOW/UNKNOWN).
+
+    The spec asks us to NEVER show raw search volume in the row UI — only
+    in the tooltip / details. The pill is what the row badge renders.
+    """
+    if not bucket:
+        return "UNKNOWN"
+    b = bucket.strip().lower()
+    if b == "high":
+        return "HIGH"
+    if b == "medium":
+        return "MEDIUM"
+    if b == "low":
+        return "LOW"
+    return "UNKNOWN"
 
 
 TEMPLATES: dict[str, str] = {
@@ -468,13 +522,43 @@ def resolve_stale_for_prompt(
         row.status = "resolved"
 
 
+def _ensure_demand(db: Session, prompt: Prompt) -> DemandResult:
+    """Return a non-null DemandResult, computing & persisting it if missing.
+
+    Detect-opportunities is allowed to back-fill demand for a single prompt
+    if the weekly refresh hasn't run yet. The Redis cache means this is
+    cheap even when 100s of prompts hit the same code path during a fresh
+    deploy.
+    """
+    if prompt.demand_score is not None and prompt.demand_bucket:
+        return DemandResult(
+            score=float(prompt.demand_score),
+            bucket=str(prompt.demand_bucket),
+            source=str(prompt.demand_source or "literal"),
+            variant=prompt.demand_variant,
+            raw_volume=prompt.demand_raw_volume,
+        )
+    result = resolve_demand(db, prompt)
+    persist_demand_to_prompt(prompt, result)
+    return result
+
+
 def detect_opportunities_for_brand(
     db: Session,
     brand_id: UUID,
     *,
     engines_override: list[str] | None = None,
 ) -> int:
-    """Recompute opportunities for one brand. Returns number of prompts evaluated."""
+    """Recompute opportunities for one brand. Returns number of prompts evaluated.
+
+    Order of work per prompt:
+        1. Resolve latest/prev cell states from EngineRun history.
+        2. Ensure precomputed demand exists (back-fill via 4-step fallback if not).
+        3. Classify gap. None → mark any open opportunity as resolved.
+        4. Score using demand_score (preferred) with absent_all + high-bucket floor.
+        5. Upsert keyed by (brand_id, prompt_id, gap_type, scope).
+        6. Mark stale open rows as resolved so the audit trail stays intact.
+    """
     brand = db.get(Brand, brand_id)
     if not brand:
         return 0
@@ -494,7 +578,9 @@ def detect_opportunities_for_brand(
         latest_states = {e: run_to_classifier_state(db, latest_runs.get(e)) for e in engines}
         prev_states = {e: run_to_classifier_state(db, prev_runs.get(e)) for e in engines}
         classified = classify_gap(latest_states, prev_states, engines)
-        ev = est_volume_for_prompt(db, p.id)
+
+        # Keep est_volume for back-compat (column still exists on opportunities + UI tooltip).
+        ev = p.demand_raw_volume if p.demand_raw_volume is not None else est_volume_for_prompt(db, p.id)
         comp_total = competitor_citation_total(db, latest_runs)
 
         if classified is None:
@@ -502,6 +588,7 @@ def detect_opportunities_for_brand(
             resolve_stale_for_prompt(db, brand_id, p.id, None, None)
             continue
 
+        demand = _ensure_demand(db, p)
         gap_type, scope_engine = classified
         p.consecutive_gap_runs = int(p.consecutive_gap_runs or 0) + 1
         score = opportunity_score(
@@ -510,6 +597,8 @@ def detect_opportunities_for_brand(
             gap_type=gap_type,
             competitor_cites=comp_total,
             consecutive_gap_runs=int(p.consecutive_gap_runs or 0),
+            demand_score=demand.score,
+            demand_bucket=demand.bucket,
         )
         g = grade_from_score(score)
         top_comp = _top_competitor_domain(
@@ -541,7 +630,23 @@ def detect_opportunities_for_brand(
     return n_eval
 
 
-def list_opportunities_for_brand(db: Session, brand_id: UUID, status: str = "open") -> list[Opportunity]:
+def list_opportunities_for_brand(
+    db: Session,
+    brand_id: UUID,
+    status: str = "open",
+    *,
+    grade: str | None = None,
+    gap_type: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[Opportunity]:
+    """Return opportunities sorted A→B→C, then by score DESC.
+
+    Optional filters:
+      grade: ``"A"`` | ``"B"`` | ``"C"`` — exact grade match
+      gap_type: e.g. ``"absent_all"`` | ``"competitor_dominant"``
+      limit/offset: pagination knobs (omit for "all rows")
+    """
     grade_order = case(
         (Opportunity.grade == "A", 0),
         (Opportunity.grade == "B", 1),
@@ -550,6 +655,35 @@ def list_opportunities_for_brand(db: Session, brand_id: UUID, status: str = "ope
     stmt = (
         select(Opportunity)
         .where(Opportunity.brand_id == brand_id, Opportunity.status == status)
-        .order_by(grade_order, Opportunity.opportunity_score.desc())
+        .order_by(grade_order, Opportunity.opportunity_score.desc(), Opportunity.detected_at.desc())
     )
+    if grade:
+        stmt = stmt.where(Opportunity.grade == grade.upper())
+    if gap_type:
+        stmt = stmt.where(Opportunity.gap_type == gap_type)
+    if offset:
+        stmt = stmt.offset(int(offset))
+    if limit is not None:
+        stmt = stmt.limit(int(limit))
     return list(db.scalars(stmt).all())
+
+
+def count_opportunities_for_brand(
+    db: Session,
+    brand_id: UUID,
+    status: str = "open",
+    *,
+    grade: str | None = None,
+    gap_type: str | None = None,
+) -> int:
+    """Total matching opportunities — used for paginated API responses."""
+    stmt = (
+        select(func.count())
+        .select_from(Opportunity)
+        .where(Opportunity.brand_id == brand_id, Opportunity.status == status)
+    )
+    if grade:
+        stmt = stmt.where(Opportunity.grade == grade.upper())
+    if gap_type:
+        stmt = stmt.where(Opportunity.gap_type == gap_type)
+    return int(db.scalar(stmt) or 0)

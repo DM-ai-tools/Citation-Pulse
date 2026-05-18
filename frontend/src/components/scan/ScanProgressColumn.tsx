@@ -19,7 +19,11 @@ export function ScanProgressColumn({ data, scanId }: { data: ScanSnapshot; scanI
   const pct = total ? Math.round((100 * overallDone) / total) : 0;
   const brand = data.brand?.name ?? data.submitted_url.replace(/^https?:\/\//, "").split("/")[0] ?? "your brand";
   const root = data.submitted_url.replace(/^https?:\/\//, "").split("/")[0];
-  const etaSec = Math.min(120, 12 + total * 3);
+  const parallel = data.execution_mode !== "sequential";
+  const etaSec = parallel
+    ? Math.min(90, 15 + Math.ceil(total / Math.max(1, data.engines.length)) * 8)
+    : Math.min(120, 12 + total * 3);
+  const routes = data.engine_routes ?? {};
 
   return (
     <div className="rounded-[18px] border border-tr-line bg-white p-8 shadow-[0_12px_40px_rgba(10,37,64,0.08)] pb-7 pt-8 sm:px-8">
@@ -29,9 +33,16 @@ export function ScanProgressColumn({ data, scanId }: { data: ScanSnapshot; scanI
         </h2>
         <span className="scan-under-mark block" aria-hidden />
         <p className="max-w-[560px] text-sm leading-relaxed text-tr-body">
-          We&apos;re firing {nP} buyer {nP === 1 ? "question" : "questions"} at {nE} AI engines ({total} calls).
-          Citations stream in as each engine resolves, with live progress by engine.
+          We&apos;re firing {nP} buyer {nP === 1 ? "question" : "questions"} at {nE} AI engines ({total} calls)
+          {parallel ? " in parallel" : ""}. ChatGPT and Claude use your direct API keys; Gemini and Perplexity run
+          through OpenRouter. Results stream in as each engine finishes.
         </p>
+        {parallel ? (
+          <p className="mt-2 inline-flex items-center gap-2 rounded-lg border border-brand-primary/30 bg-brand-primary/[0.06] px-3 py-1.5 text-[12px] font-semibold text-brand-primary">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-primary" aria-hidden />
+            Parallel execution — all engines running at once
+          </p>
+        ) : null}
       </div>
 
       <div className="my-6 flex flex-wrap gap-2.5">
@@ -80,7 +91,15 @@ export function ScanProgressColumn({ data, scanId }: { data: ScanSnapshot; scanI
             const pe = data.progress.per_engine[eng];
             const rowTotal = pe && pe.total > 0 ? pe.total : nP;
             const rowDone = Math.min(pe?.done ?? 0, rowTotal);
-            return <EngineProgressRow key={eng} engine={eng} done={rowDone} total={rowTotal} />;
+            return (
+              <EngineProgressRow
+                key={eng}
+                engine={eng}
+                done={rowDone}
+                total={rowTotal}
+                route={routes[eng]}
+              />
+            );
           })}
         </div>
       </div>

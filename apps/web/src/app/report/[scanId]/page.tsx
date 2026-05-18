@@ -6,13 +6,14 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CitationHeatmap } from "@/components/report/CitationHeatmap";
-import { CitationsList } from "@/components/report/CitationsList";
 import { DfyCta } from "@/components/report/DfyCta";
 import { EngineLayerSelector } from "@/components/report/EngineLayerSelector";
 import { HeatmapBreakdownCards } from "@/components/report/HeatmapBreakdownCards";
 import { PromptEngineScoreMatrix } from "@/components/report/PromptEngineScoreMatrix";
 import { ReportHero } from "@/components/report/ReportHero";
 import { ReportTopBar } from "@/components/report/ReportTopBar";
+import { CompetitorDiscovery } from "@/components/report/CompetitorDiscovery";
+import { CompetitorEngineCitations } from "@/components/report/CompetitorEngineCitations";
 import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
 import {
   BrandSovDashboard,
@@ -25,6 +26,7 @@ import { apiFetch } from "@/lib/api";
 import { rememberDashboardScan } from "@/lib/dashboardScanPreference";
 import { engineLayerScores, overallCitationScore } from "@/lib/matrixStats";
 import { engineTitle } from "@/lib/engineDisplay";
+import { rosterFromReport } from "@/lib/competitorRoster";
 import { shareScan } from "@/services/scans";
 import type { MatrixCell } from "@/types/scan";
 
@@ -64,12 +66,18 @@ export default function ReportPage() {
     typeof rawScanId === "string" ? rawScanId : Array.isArray(rawScanId) ? (rawScanId[0] ?? "") : "";
   const q = useReport(scanId);
   const [layer, setLayer] = useState<string | null>(null);
+  const [competitorPromptId, setCompetitorPromptId] = useState<string | null>(null);
 
   useEffect(() => {
     if (scanId && q.data?.submitted_url) {
       rememberDashboardScan(scanId, q.data.submitted_url);
     }
   }, [scanId, q.data?.submitted_url]);
+
+  useEffect(() => {
+    const first = q.data?.prompts[0]?.id;
+    if (first && competitorPromptId === null) setCompetitorPromptId(first);
+  }, [q.data?.prompts, competitorPromptId]);
 
   const engines = q.data?.engines ?? [];
   const allCells = useMemo(() => q.data?.matrix.cells ?? [], [q.data?.matrix.cells]);
@@ -93,6 +101,11 @@ export default function ReportPage() {
     if (!q.data) return "";
     return formatReportTimestamp(q.data.completed_at, q.dataUpdatedAt);
   }, [q.data, q.dataUpdatedAt]);
+
+  const competitorRoster = useMemo(
+    () => (q.data ? rosterFromReport(q.data) : { userProvided: [], analysis: [] }),
+    [q.data],
+  );
 
   /** Prefer SoV embedded in the report; otherwise fetch via scan (public), never ``/brands/.../sov`` (Clerk). */
   const brandIdForSov = q.data?.brand?.id ?? null;
@@ -236,7 +249,15 @@ export default function ReportPage() {
       )}
 
       {/* Full-width above the heatmap so Top gap opportunities matches /dashboard prominence and is not lost below the fold (prod users often scroll straight to citations). */}
-      <div className="mx-auto max-w-[1280px] px-6 pt-5">
+      <div className="mx-auto max-w-[1280px] space-y-5 px-6 pt-5">
+        <CompetitorDiscovery
+          id="competitor-discovery"
+          discovery={d.competitor_discovery}
+          userProvided={competitorRoster.userProvided}
+          analysisCompetitors={competitorRoster.analysis}
+          scanStatus={d.status}
+          pending={Boolean(d.competitor_discovery_pending)}
+        />
         <TopGapOpportunities id="top-gap-opportunities" opportunities={d.opportunities ?? []} />
       </div>
 
@@ -265,11 +286,18 @@ export default function ReportPage() {
           <DfyCta />
         </div>
         <div className="min-w-0 w-full lg:col-span-2">
-          <CitationsList
-            cells={allCells}
-            engineFilter={layer}
-            engines={d.engines}
-            title={layer ? `Citations from ${engineTitle(layer)}` : "Citations Found"}
+          <CompetitorEngineCitations
+            data={d.competitor_citation_visibility}
+            prompts={d.prompts}
+            selectedPromptId={competitorPromptId}
+            onPromptSelect={setCompetitorPromptId}
+            discoveryPending={Boolean(d.competitor_discovery_pending)}
+            discoveryFailed={
+              !d.competitor_discovery &&
+              !d.competitor_discovery_pending &&
+              (d.competitor_discovery_status === "failed" ||
+                d.competitor_discovery_status === "skipped")
+            }
           />
         </div>
       </div>

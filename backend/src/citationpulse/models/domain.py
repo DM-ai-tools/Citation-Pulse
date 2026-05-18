@@ -169,6 +169,9 @@ class Scan(Base):
     share_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Funnel competitor intelligence (POST /competitors/analyze output), filled when scan completes.
+    discovery_params: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    competitor_discovery: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     brand: Mapped[Brand] = relationship(back_populates="scans")
     engine_runs: Mapped[list["EngineRun"]] = relationship(back_populates="scan")
@@ -188,6 +191,20 @@ class Prompt(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     consecutive_gap_runs: Mapped[int] = mapped_column(Integer, nullable=False, server_default=sql_text("0"))
+
+    # --- Demand resolution (precomputed; see services/demand.py) ----------
+    # Score is in [0, 1]. Bucket is high|medium|low|unknown. Source records
+    # which step in the 4-step fallback set the value:
+    #   literal  — DataForSEO returned >= MIN_VOLUME for the raw prompt
+    #   variant  — DataForSEO returned >= MIN_VOLUME for a decomposed variant
+    #   internal — composite of richness/consensus/crowd (no external lookup)
+    #   default  — hard-coded 0.30 / "unknown" fallback
+    demand_score: Mapped[Any | None] = mapped_column(Numeric(5, 4), nullable=True)
+    demand_bucket: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    demand_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    demand_variant: Mapped[str | None] = mapped_column(Text, nullable=True)
+    demand_raw_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    demand_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     brand: Mapped[Brand] = relationship(back_populates="prompts")
     engine_runs: Mapped[list[EngineRun]] = relationship(back_populates="prompt")

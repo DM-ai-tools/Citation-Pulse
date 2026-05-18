@@ -1,16 +1,18 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { engineLetter, engineScanRowTitle } from "@/lib/engineDisplay";
+import { engineLetter, engineRouteLabel, engineScanRowTitle } from "@/lib/engineDisplay";
 
 export function EngineProgressRow({
   engine,
   done,
   total,
+  route,
 }: {
   engine: string;
   done: number;
   total: number;
+  route?: string;
 }) {
   const max = Math.max(1, total);
   const complete = done >= total && total > 0;
@@ -45,6 +47,9 @@ export function EngineProgressRow({
         <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2 text-[13px]">
           <span className="font-display text-sm font-bold text-tr-navy">
             {engineScanRowTitle(engine)}
+            <span className="mt-0.5 block text-[11px] font-medium text-tr-mute">
+              {engineRouteLabel(route)}
+            </span>
           </span>
           <span
             className={cn(

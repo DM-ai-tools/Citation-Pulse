@@ -51,6 +51,17 @@ CREATE INDEX IF NOT EXISTS ix_opportunities_brand_status_score
 """.strip(),
 )
 
+_SCAN_COMPETITOR_DDL: tuple[str, ...] = (
+    """
+ALTER TABLE scans
+  ADD COLUMN IF NOT EXISTS discovery_params JSONB NULL
+""".strip(),
+    """
+ALTER TABLE scans
+  ADD COLUMN IF NOT EXISTS competitor_discovery JSONB NULL
+""".strip(),
+)
+
 
 def ensure_opportunities_schema(engine: Engine) -> None:
     if engine.dialect.name != "postgresql":
@@ -58,6 +69,8 @@ def ensure_opportunities_schema(engine: Engine) -> None:
     try:
         with engine.begin() as conn:
             for stmt in _OPPORTUNITIES_DDL:
+                conn.execute(text(stmt))
+            for stmt in _SCAN_COMPETITOR_DDL:
                 conn.execute(text(stmt))
     except Exception:
         _log.exception("runtime schema bootstrap (opportunities) failed")

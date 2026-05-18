@@ -1,4 +1,6 @@
 import type { MultiWeeklyResponse, SoVMultiEntityResponse } from "@/components/sov/BrandSovDashboard";
+import type { CompetitorDiscoveryResult } from "./competitors";
+import type { CompetitorCitationVisibility } from "./competitorVisibility";
 import type { ScanSnapshot } from "./scan";
 
 export type GapItem = {
@@ -34,6 +36,30 @@ export type ReportData = ScanSnapshot & {
     neutral_share: number;
   } | null;
   competitors: { id: string; name: string; domains: string }[];
+  /** Tiered AI competitor discovery (filled when scan completes). */
+  competitor_discovery?: CompetitorDiscoveryResult | null;
+  /** True while background tiered discovery is still running (poll report until false). */
+  competitor_discovery_pending?: boolean;
+  competitor_discovery_status?: string | null;
+  /** Competitor landscape matched to live engine citations, ranked by visibility. */
+  competitor_citation_visibility?: CompetitorCitationVisibility | null;
+  /** Domains the user entered at scan setup. */
+  user_provided_competitors?: {
+    domain: string;
+    name: string;
+    level: string;
+    tier?: string;
+    source?: string;
+  }[];
+  /** Competitors returned by AI discovery (same-level + one tier above). */
+  analysis_competitors?: {
+    domain: string;
+    name: string;
+    level: string;
+    tier?: string;
+    rank?: number | null;
+    source?: string;
+  }[];
   /** Graded gaps for this brand (open rows); empty until `detect_opportunities` has run. */
   opportunities?: OpportunityRow[];
   /** Embedded on ``GET /scans/{id}/report`` so anonymous funnel pages do not call Clerk-protected ``/brands/.../sov``. */

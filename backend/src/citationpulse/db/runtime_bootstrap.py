@@ -49,6 +49,52 @@ CREATE TABLE IF NOT EXISTS opportunities (
 CREATE INDEX IF NOT EXISTS ix_opportunities_brand_status_score
   ON opportunities (brand_id, status, opportunity_score DESC)
 """.strip(),
+    # --- 2026-05-14: demand resolution columns on prompts -------------------
+    # Stores the precomputed demand signal (DataForSEO literal / variant /
+    # internal composite / default fallback) so nightly scoring never touches
+    # an external API at request time. Aligns with ``services/demand.py``.
+    """
+ALTER TABLE prompts
+  ADD COLUMN IF NOT EXISTS demand_score numeric(5,4) NULL,
+  ADD COLUMN IF NOT EXISTS demand_bucket text NULL,
+  ADD COLUMN IF NOT EXISTS demand_source text NULL,
+  ADD COLUMN IF NOT EXISTS demand_variant text NULL,
+  ADD COLUMN IF NOT EXISTS demand_raw_volume integer NULL,
+  ADD COLUMN IF NOT EXISTS demand_refreshed_at timestamptz NULL
+""".strip(),
+    """
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_prompts_demand_bucket') THEN
+    ALTER TABLE prompts
+      ADD CONSTRAINT ck_prompts_demand_bucket
+      CHECK (demand_bucket IS NULL OR demand_bucket IN ('high','medium','low','unknown'));
+  END IF;
+END $$
+""".strip(),
+    """
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_prompts_demand_source') THEN
+    ALTER TABLE prompts
+      ADD CONSTRAINT ck_prompts_demand_source
+      CHECK (demand_source IS NULL OR demand_source IN ('literal','variant','internal','default'));
+  END IF;
+END $$
+""".strip(),
+    """
+CREATE INDEX IF NOT EXISTS ix_prompts_demand_refreshed_at
+  ON prompts (demand_refreshed_at NULLS FIRST)
+""".strip(),
+)
+
+_SCAN_COMPETITOR_DDL: tuple[str, ...] = (
+    """
+ALTER TABLE scans
+  ADD COLUMN IF NOT EXISTS discovery_params JSONB NULL
+""".strip(),
+    """
+ALTER TABLE scans
+  ADD COLUMN IF NOT EXISTS competitor_discovery JSONB NULL
+""".strip(),
 )
 
 
@@ -58,6 +104,8 @@ def ensure_opportunities_schema(engine: Engine) -> None:
     try:
         with engine.begin() as conn:
             for stmt in _OPPORTUNITIES_DDL:
+                conn.execute(text(stmt))
+            for stmt in _SCAN_COMPETITOR_DDL:
                 conn.execute(text(stmt))
     except Exception:
         _log.exception("runtime schema bootstrap (opportunities) failed")

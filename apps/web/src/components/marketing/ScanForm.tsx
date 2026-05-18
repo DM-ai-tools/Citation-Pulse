@@ -215,6 +215,7 @@ export function ScanForm({ className }: { className?: string }) {
         competitors: parsed.data.competitors.length ? parsed.data.competitors : undefined,
         prompts: parsed.data.prompts,
         locale: parsed.data.locale,
+        auto_discover_competitors: true,
       });
       rememberDashboardScan(res.scan_id, parsed.data.url);
       toast.success("Scan started");

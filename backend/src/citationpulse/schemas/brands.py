@@ -94,6 +94,16 @@ class GapRead(BaseModel):
 
 
 class OpportunityRead(BaseModel):
+    """One row in the Top Gap Opportunities table.
+
+    The ``demand_*`` fields surface the precomputed demand signal so the UI
+    can render the HIGH/MEDIUM/LOW pill (``demand_bucket``) and the tooltip
+    (raw volume + which step in the 4-step fallback produced the value).
+
+    Per spec: ``demand_raw_volume`` is NOT shown in the row directly — UIs
+    only render it inside the tooltip / details drawer.
+    """
+
     id: uuid.UUID
     brand_id: uuid.UUID
     prompt_id: uuid.UUID
@@ -101,14 +111,37 @@ class OpportunityRead(BaseModel):
     gap_type: str
     scope: str | None = None
     grade: str
-    heat: str
+    heat: str  # HOT | WARM | COOL — derived from grade
     opportunity_score: float
     description: str
     est_volume: int | None
     status: str
     detected_at: datetime
 
+    # --- Demand signal (precomputed) ---
+    demand_score: float | None = None
+    demand_bucket: str | None = None  # high | medium | low | unknown
+    demand_pill: str | None = None  # HIGH | MEDIUM | LOW | UNKNOWN
+    demand_source: str | None = None  # literal | variant | internal | default
+    demand_variant: str | None = None  # the variant that gave us the volume
+    demand_raw_volume: int | None = None  # tooltip / details only
+    demand_refreshed_at: datetime | None = None
+
     model_config = {"from_attributes": False}
+
+
+class OpportunityListResponse(BaseModel):
+    """Envelope for paginated opportunity listings.
+
+    The frontend can ignore the envelope and read ``items`` for the simple
+    case — but pagination metadata is here for table virtualisation.
+    """
+
+    items: list[OpportunityRead]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
 
 
 class AlertRuleCreate(BaseModel):

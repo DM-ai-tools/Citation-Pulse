@@ -169,6 +169,8 @@ class Scan(Base):
     share_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    discovery_params: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    competitor_discovery: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     brand: Mapped[Brand] = relationship(back_populates="scans")
     engine_runs: Mapped[list["EngineRun"]] = relationship(back_populates="scan")

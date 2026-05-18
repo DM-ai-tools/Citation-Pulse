@@ -38,6 +38,22 @@ class Settings(BaseSettings):
     celery_broker_url: str = ""
     celery_result_backend: str = ""
 
+    # --- Optional Redis cache (Top Gap Opportunities) ---
+    # When set, DataForSEO lookups + cross-tenant demand-similarity entries are
+    # cached in Redis for 7d via ``services.cache``. When unset the cache layer
+    # falls back to an in-process LRU so the pipeline still runs (just less
+    # efficiently across worker processes).
+    redis_url: str = ""
+
+    # --- Top Gap Opportunities tuning ---
+    # Volume threshold (per locale) above which DataForSEO is considered a
+    # usable demand signal. Below this we fall through to keyword variants.
+    demand_min_literal_volume: int = 50
+    demand_min_variant_volume: int = 50
+    # Bucket thresholds — surface on the row pill as HIGH / MEDIUM / LOW.
+    demand_high_volume: int = 5000
+    demand_medium_volume: int = 500
+
     # SSE polling interval for live scan stream (seconds). Tradeoff: lower = snappier UI,
     # higher = less DB load. 0.5–1.0s is a fine sweet spot for dev.
     sse_poll_interval_s: float = 0.6
@@ -69,9 +85,9 @@ class Settings(BaseSettings):
     stripe_price_saas: str = ""  # $597/mo price id
     stripe_price_dfy: str = ""  # $1200/mo price id
 
-    # --- Unified LLM gateway (OpenRouter) ---
-    # ALL provider calls (ChatGPT, Claude, Gemini, Perplexity) are now routed
-    # through OpenRouter with a single key. Get one at https://openrouter.ai/keys.
+    # --- Hybrid LLM routing ---
+    # ChatGPT → OPENAI_API_KEY (direct, parallel). Claude → ANTHROPIC_API_KEY (direct).
+    # Gemini + Perplexity → OPENROUTER_API_KEY only. See services/engine_routing.py.
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Optional OpenRouter analytics headers — appear on the public leaderboard
@@ -89,10 +105,17 @@ class Settings(BaseSettings):
             s = s[1:-1].strip()
         return s
 
-    # --- Legacy provider keys (kept for back-compat / migration only) ---
-    # If `openrouter_api_key` is set, these are IGNORED. They remain here so an
-    # operator can still flip back to direct-SDK mode by deleting their
-    # OPENROUTER_API_KEY without losing their previous setup.
+    @field_validator("openai_api_key", "anthropic_api_key", mode="before")
+    @classmethod
+    def normalise_provider_api_keys(cls, v: object) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+            s = s[1:-1].strip()
+        return s
+
+    # Direct provider keys (preferred for ChatGPT + Claude — lower latency).
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     google_ai_api_key: str = ""
@@ -105,10 +128,14 @@ class Settings(BaseSettings):
     # OpenRouter's web-search plugin for citation grounding on models that
     # don't have native web search (ChatGPT / Claude / Gemini). Perplexity's
     # `sonar` already has native web search, so no `:online` suffix.
+    # OpenRouter slugs (Gemini + Perplexity; also fallback for ChatGPT/Claude).
     chatgpt_model: str = "openai/gpt-4o-mini:online"
     claude_model: str = "anthropic/claude-3.5-haiku:online"
     gemini_model: str = "google/gemini-2.0-flash-001:online"
     perplexity_model: str = "perplexity/sonar"
+    # Direct API model ids when OPENAI_API_KEY / ANTHROPIC_API_KEY are set.
+    openai_direct_model: str = "gpt-4o-mini-search-preview"
+    anthropic_direct_model: str = "claude-3-5-haiku-latest"
 
     # Sentiment classifier — uses a cheap fast model. Same OpenRouter slug
     # convention. No `:online` because we don't need web search for sentiment.
@@ -118,6 +145,16 @@ class Settings(BaseSettings):
     llm_request_timeout_s: float = 120.0
     llm_max_retries: int = 3
     llm_max_tokens: int = 1024
+
+    # Run all engine calls for a scan concurrently (asyncio.gather in one Celery task).
+    scan_parallel_engines: bool = True
+    scan_parallel_max_concurrent: int = 8
+
+    # Competitor discovery (POST /api/v1/competitors/analyze) — large JSON payload.
+    competitor_discovery_model: str = "openai/gpt-4o-mini:online"
+    competitor_discovery_max_tokens: int = 8192
+    competitor_analyze_rate_limit_per_hour: int = 12
+    competitor_analyze_mesh_rate_limit_per_hour: int = 120
 
     # --- Legacy model-override aliases (kept so old .env files keep working) ---
     # If set, these override the OpenRouter slugs above. Empty by default.

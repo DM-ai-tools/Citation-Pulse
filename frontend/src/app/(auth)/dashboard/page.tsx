@@ -488,6 +488,9 @@ function BrandDashboard(props: {
   matrix: MatrixBundle;
   sov: SoVResponse | null;
   opportunities: OpportunityRow[];
+  opportunitiesLoading?: boolean;
+  opportunitiesError?: boolean;
+  opportunitiesRetry?: () => void;
 }) {
   const cells = props.matrix.matrix.cells ?? [];
   const engines = props.matrix.engines ?? [];
@@ -534,7 +537,12 @@ function BrandDashboard(props: {
         tableRows={tableRows}
         beforeCitations={
           <div className="max-w-6xl">
-            <TopGapOpportunities opportunities={props.opportunities} />
+            <TopGapOpportunities
+              opportunities={props.opportunities}
+              isLoading={props.opportunitiesLoading}
+              isError={props.opportunitiesError}
+              onRetry={props.opportunitiesRetry}
+            />
           </div>
         }
       />
@@ -700,6 +708,9 @@ export default function DashboardPage() {
       matrix={matrix.data}
       sov={sov.data}
       opportunities={opportunityRows}
+      opportunitiesLoading={brandOpportunities.isPending}
+      opportunitiesError={brandOpportunities.isError}
+      opportunitiesRetry={() => void brandOpportunities.refetch()}
     />
   );
 }

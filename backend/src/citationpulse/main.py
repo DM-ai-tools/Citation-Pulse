@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from citationpulse.api.v1.billing import router as billing_router
+from citationpulse.api.v1.competitors import router as competitors_router
 from citationpulse.api.v1.endpoints import router as v1_router
 from citationpulse.api.v1.scans import router as scans_router
 from citationpulse.api.v1.operator import router as operator_router
@@ -99,6 +100,7 @@ def root():
             "scan_stream": "GET /api/v1/scans/{scan_id}/stream (SSE)",
             "public_share": "GET /api/v1/scans/public/{token}",
             "brand_opportunities": "GET /api/v1/brands/{brand_id}/opportunities?status=open",
+            "competitor_analyze": "POST /api/v1/competitors/analyze",
         },
         "web_app": "http://localhost:3000",
     }
@@ -119,6 +121,7 @@ def metrics_stub():
 
 
 app.include_router(v1_router, prefix="/api/v1")
+app.include_router(competitors_router, prefix="/api/v1")
 app.include_router(scans_router, prefix="/api/v1")
 app.include_router(billing_router, prefix="/api/v1")
 app.include_router(partner_router, prefix="/api/v1")

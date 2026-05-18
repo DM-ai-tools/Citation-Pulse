@@ -12,6 +12,7 @@ import { HeatmapBreakdownCards } from "@/components/report/HeatmapBreakdownCards
 import { PromptEngineScoreMatrix } from "@/components/report/PromptEngineScoreMatrix";
 import { ReportHero } from "@/components/report/ReportHero";
 import { ReportTopBar } from "@/components/report/ReportTopBar";
+import { CompetitorDiscovery } from "@/components/report/CompetitorDiscovery";
 import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
 import { ErrorState, Skeleton } from "@/components/primitives";
 import { useReport } from "@/hooks/useReport";
@@ -128,7 +129,12 @@ export default function ReportPage() {
         <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
       </div>
 
-      <div className="mx-auto max-w-[1280px] px-6 pt-5">
+      <div className="mx-auto max-w-[1280px] space-y-5 px-6 pt-5">
+        <CompetitorDiscovery
+          id="competitor-discovery"
+          discovery={d.competitor_discovery}
+          scanStatus={d.status}
+        />
         <TopGapOpportunities id="top-gap-opportunities" opportunities={d.opportunities ?? []} />
       </div>
 

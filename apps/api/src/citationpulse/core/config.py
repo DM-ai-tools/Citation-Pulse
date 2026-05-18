@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# apps/api/src/citationpulse/core/config.py → repo root is parents[5]
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+_API_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _settings_env_files() -> tuple[str, ...]:
+    """Absolute paths so uvicorn cwd (apps/api) still loads the monorepo .env."""
+    out: list[str] = []
+    for p in (_REPO_ROOT / ".env", _API_ROOT / ".env", Path(".env")):
+        if p.is_file():
+            out.append(str(p))
+    return tuple(out)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "../../.env"),
+        env_file=_settings_env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -52,9 +66,7 @@ class Settings(BaseSettings):
     stripe_price_saas: str = ""  # $597/mo price id
     stripe_price_dfy: str = ""  # $1200/mo price id
 
-    # --- Unified LLM gateway (OpenRouter) ---
-    # ALL provider calls (ChatGPT, Claude, Gemini, Perplexity) are now routed
-    # through OpenRouter with a single key. Get one at https://openrouter.ai/keys.
+    # Hybrid routing: ChatGPT/Claude use direct keys when set; Gemini/Perplexity use OpenRouter.
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Optional OpenRouter analytics headers — appear on the public leaderboard
@@ -73,10 +85,16 @@ class Settings(BaseSettings):
             s = s[1:-1].strip()
         return s
 
-    # --- Legacy provider keys (kept for back-compat / migration only) ---
-    # If `openrouter_api_key` is set, these are IGNORED. They remain here so an
-    # operator can still flip back to direct-SDK mode by deleting their
-    # OPENROUTER_API_KEY without losing their previous setup.
+    @field_validator("openai_api_key", "anthropic_api_key", mode="before")
+    @classmethod
+    def normalise_provider_api_keys(cls, v: object) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+            s = s[1:-1].strip()
+        return s
+
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     google_ai_api_key: str = ""
@@ -90,9 +108,11 @@ class Settings(BaseSettings):
     # don't have native web search (ChatGPT / Claude / Gemini). Perplexity's
     # `sonar` already has native web search, so no `:online` suffix.
     chatgpt_model: str = "openai/gpt-4o-mini:online"
-    claude_model: str = "anthropic/claude-3.5-haiku:online"
+    claude_model: str = "anthropic/claude-sonnet-4:online"
     gemini_model: str = "google/gemini-2.0-flash-001:online"
     perplexity_model: str = "perplexity/sonar"
+    openai_direct_model: str = "gpt-4o-mini-search-preview"
+    anthropic_direct_model: str = "claude-sonnet-4-5-20250929"
 
     # Sentiment classifier — uses a cheap fast model. Same OpenRouter slug
     # convention. No `:online` because we don't need web search for sentiment.
@@ -102,6 +122,12 @@ class Settings(BaseSettings):
     llm_request_timeout_s: float = 120.0
     llm_max_retries: int = 3
     llm_max_tokens: int = 1024
+
+    # Competitor discovery (POST /api/v1/competitors/analyze) — large JSON payload.
+    competitor_discovery_model: str = "openai/gpt-4o-mini:online"
+    competitor_discovery_max_tokens: int = 8192
+    competitor_analyze_rate_limit_per_hour: int = 12
+    competitor_analyze_mesh_rate_limit_per_hour: int = 120
 
     # --- Legacy model-override aliases (kept so old .env files keep working) ---
     # If set, these override the OpenRouter slugs above. Empty by default.

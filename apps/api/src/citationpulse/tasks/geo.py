@@ -23,6 +23,8 @@ from citationpulse.models.domain import (
     default_engines,
 )
 from citationpulse.services.embeddings import embed_texts
+from citationpulse.services.engine_routing import engine_route, route_label
+from citationpulse.services.direct_llm import DirectProviderError
 from citationpulse.services.llm_router import LLMProviderError
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.ownership import classify_domain
@@ -36,6 +38,26 @@ from citationpulse.services.scans_flow import (
 )
 
 _log = logging.getLogger(__name__)
+
+# Parallel engine waves: wave 1 runs together, then wave 2 (reduces wall-clock vs one-by-one).
+WAVE_1_ENGINES: frozenset[str] = frozenset(
+    {EngineType.CHATGPT.value, EngineType.PERPLEXITY.value},
+)
+WAVE_2_ENGINES: frozenset[str] = frozenset(
+    {EngineType.CLAUDE.value, EngineType.GEMINI.value},
+)
+
+
+def _engine_key(run: EngineRun) -> str:
+    return run.engine.value if hasattr(run.engine, "value") else str(run.engine)
+
+
+def wave_for_engine(engine_key: str) -> int:
+    if engine_key in WAVE_1_ENGINES:
+        return 1
+    if engine_key in WAVE_2_ENGINES:
+        return 2
+    return 1
 
 
 def _persist_citations_from_response(db: Session, run: EngineRun, resp: EngineResponse) -> int:
@@ -113,8 +135,8 @@ def normalise_citations_for_run(db: Session, run: EngineRun) -> bool:
     return True
 
 
-@celery_app.task(name="citationpulse.run_engine")
-def run_engine_task(run_id: str) -> str:
+async def _run_single_engine_run_async(run_id: str) -> str:
+    """Execute one engine run (own DB session — safe for asyncio.gather)."""
     db = SessionLocal()
     try:
         run = db.get(EngineRun, UUID(run_id))
@@ -134,21 +156,35 @@ def run_engine_task(run_id: str) -> str:
             db.refresh(run)
             publish_cell_update(db, run)
 
+        engine_key = _engine_key(run)
+        route = engine_route(engine_key)
+        if route == "unconfigured":
+            run.status = RunStatus.ERROR.value
+            run.error_message = (
+                f"No API key configured for {engine_key}. "
+                "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, and/or OPENROUTER_API_KEY in the repo root .env."
+            )[:4000]
+            run.finished_at = datetime.now(timezone.utc)
+            db.commit()
+            if run.scan_id:
+                db.refresh(run)
+                publish_cell_update(db, run)
+                maybe_complete_scan(db, run.scan_id)
+            return "error"
+
         adapter = build_adapter(run.engine)
         ctx = {"run_id": run_id, "tenant_id": str(run.tenant_id), "brand_id": str(brand.id)}
         try:
-            resp = asyncio.run(
-                adapter.run(prompt.text, locale=prompt.locale, run_ctx=ctx),
-            )
+            resp = await adapter.run(prompt.text, locale=prompt.locale, run_ctx=ctx)
         except Exception as exc:  # noqa: BLE001
             run.status = RunStatus.ERROR.value
             msg = str(exc)
-            if isinstance(exc, LLMProviderError) and exc.status_code == 401:
-                msg = (
-                    "OpenRouter rejected the request (HTTP 401). "
-                    "Set OPENROUTER_API_KEY on Railway for this service (same value as local .env). "
-                    f"Details: {exc.body[:400]}"
-                )
+            if isinstance(exc, (LLMProviderError, DirectProviderError)) and exc.status_code == 401:
+                label = route_label(route)
+                provider = getattr(exc, "provider", None)
+                if provider:
+                    label = f"{provider} API (direct)"
+                msg = f"{label} rejected the request (HTTP 401). Check API keys in .env. Details: {exc.body[:400]}"
             run.error_message = msg[:4000]
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
@@ -156,9 +192,21 @@ def run_engine_task(run_id: str) -> str:
                 db.refresh(run)
                 publish_cell_update(db, run)
                 maybe_complete_scan(db, run.scan_id)
-            # Do not Celery-retry here: eager mode runs inside Starlette BackgroundTasks and
-            # `raise self.retry` surfaces as "Exception in ASGI application" after POST /scans.
             _log.warning("run_engine failed run_id=%s engine=%s: %s", run_id, run.engine, exc)
+            return "error"
+
+        if not (resp.raw_payload_ref or "").strip() and not resp.citations and not (resp.answer_text or "").strip():
+            run.status = RunStatus.ERROR.value
+            run.error_message = (
+                f"{engine_key} returned no data ({route_label(route)}). "
+                "Verify API keys in the repo root .env and restart the API."
+            )[:4000]
+            run.finished_at = datetime.now(timezone.utc)
+            db.commit()
+            if run.scan_id:
+                db.refresh(run)
+                publish_cell_update(db, run)
+                maybe_complete_scan(db, run.scan_id)
             return "error"
 
         run.raw_ref = resp.raw_payload_ref
@@ -182,13 +230,53 @@ def run_engine_task(run_id: str) -> str:
             normalise_task.delay(run_id)
         db.refresh(run)
         if run.scan_id:
-            eng = run.engine.value if hasattr(run.engine, "value") else str(run.engine)
+            eng = _engine_key(run)
             publish_scan_event(str(run.scan_id), engine_progress_event(db, run.scan_id, eng))
             publish_cell_update(db, run)
             maybe_complete_scan(db, run.scan_id)
         return "ok"
     finally:
         db.close()
+
+
+@celery_app.task(name="citationpulse.run_engine")
+def run_engine_task(run_id: str) -> str:
+    """Single engine run (brand fan-out / retries). Scans use batched parallel waves."""
+    return asyncio.run(_run_single_engine_run_async(run_id))
+
+
+async def _run_engine_wave_async(run_ids: list[str], *, wave: int) -> None:
+    if not run_ids:
+        return
+    _log.info("engine wave %s starting count=%s", wave, len(run_ids))
+    results = await asyncio.gather(
+        *[_run_single_engine_run_async(rid) for rid in run_ids],
+        return_exceptions=True,
+    )
+    for rid, res in zip(run_ids, results, strict=True):
+        if isinstance(res, Exception):
+            _log.exception("parallel engine run raised run_id=%s wave=%s", rid, wave, exc_info=res)
+    _log.info("engine wave %s finished count=%s", wave, len(run_ids))
+
+
+async def _run_scan_engine_waves_async(wave1_ids: list[str], wave2_ids: list[str]) -> None:
+    await _run_engine_wave_async(wave1_ids, wave=1)
+    await _run_engine_wave_async(wave2_ids, wave=2)
+
+
+@celery_app.task(name="citationpulse.run_scan_engine_waves")
+def run_scan_engine_waves_task(
+    scan_id: str,
+    wave1_ids: list[str],
+    wave2_ids: list[str],
+) -> str:
+    """Run scan engines in two parallel batches: ChatGPT+Perplexity, then Claude+Gemini."""
+    try:
+        asyncio.run(_run_scan_engine_waves_async(wave1_ids, wave2_ids))
+        return f"ok:{len(wave1_ids)}+{len(wave2_ids)}"
+    except Exception:
+        _log.exception("run_scan_engine_waves failed scan_id=%s", scan_id)
+        return "error"
 
 
 @celery_app.task(name="citationpulse.normalise")
@@ -256,6 +344,92 @@ def canary_check() -> str:
         db.close()
 
 
+@celery_app.task(name="citationpulse.start_scan")
+def start_scan_task(scan_id: str) -> str:
+    """Run competitor landscape first, then fan out engine citation checks."""
+    db = SessionLocal()
+    try:
+        from citationpulse.services.competitor_discovery_scan import (
+            auto_discover_enabled,
+            run_competitor_discovery_for_scan,
+            set_discovery_status,
+        )
+
+        scan = db.get(Scan, UUID(scan_id))
+        if not scan:
+            return "missing_scan"
+
+        if auto_discover_enabled(scan) and not scan.competitor_discovery:
+            set_discovery_status(scan, "pending")
+            scan.status = "running"
+            db.commit()
+            try:
+                publish_scan_event(scan_id, {"type": "competitor.discovery.started"})
+            except Exception:
+                _log.debug("competitor.discovery.started event failed scan_id=%s", scan_id)
+
+            result = run_competitor_discovery_for_scan(db, scan)
+            if not result and not scan.competitor_discovery:
+                params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+                if params.get("discovery_status") == "pending":
+                    set_discovery_status(scan, "skipped")
+            db.commit()
+            if result is not None or scan.competitor_discovery:
+                try:
+                    publish_scan_event(scan_id, {"type": "competitor.discovery.ready"})
+                except Exception:
+                    _log.debug("competitor.discovery.ready event failed scan_id=%s", scan_id)
+
+        fan_out_scan_task.delay(scan_id)
+        return "ok"
+    except Exception:
+        _log.exception("start_scan_task failed scan_id=%s", scan_id)
+        try:
+            fan_out_scan_task.delay(scan_id)
+        except Exception:
+            _log.exception("fan_out fallback after start_scan failed scan_id=%s", scan_id)
+        return "error"
+    finally:
+        db.close()
+
+
+@celery_app.task(name="citationpulse.competitor_discovery_for_scan")
+def competitor_discovery_for_scan_task(scan_id: str) -> str:
+    """Re-run tiered competitor discovery (manual/backfill). Normal scans use ``start_scan_task``."""
+    db = SessionLocal()
+    try:
+        from citationpulse.services.competitor_discovery_scan import (
+            run_competitor_discovery_for_scan,
+            set_discovery_status,
+        )
+
+        scan = db.get(Scan, UUID(scan_id))
+        if not scan:
+            return "missing_scan"
+        result = run_competitor_discovery_for_scan(db, scan)
+        if not result and not scan.competitor_discovery:
+            params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+            # Do not overwrite explicit failures from analyze_competitors validation.
+            if params.get("discovery_status") == "pending":
+                set_discovery_status(scan, "skipped")
+        if result is not None or scan.competitor_discovery:
+            from citationpulse.services.competitor_citation_visibility import reclassify_scan_citations
+
+            reclassify_scan_citations(db, scan)
+        db.commit()
+        if result is not None:
+            try:
+                publish_scan_event(scan_id, {"type": "competitor.discovery.ready"})
+            except Exception:
+                _log.debug("competitor.discovery.ready event failed scan_id=%s", scan_id)
+        return "ok"
+    except Exception:
+        _log.exception("competitor_discovery_for_scan_task failed scan_id=%s", scan_id)
+        return "error"
+    finally:
+        db.close()
+
+
 @celery_app.task(name="citationpulse.fan_out_scan")
 def fan_out_scan_task(scan_id: str) -> str:
     db = SessionLocal()
@@ -271,8 +445,14 @@ def fan_out_scan_task(scan_id: str) -> str:
         scan.status = "running"
         db.commit()
         n = max(1, len(prompts) * len(eng_list))
-        publish_scan_event(scan_id, {"type": "scan.eta", "etaSeconds": min(900, n * 40)})
+        wave_count = 2 if any(e in WAVE_2_ENGINES for e in eng_list) else 1
+        publish_scan_event(
+            scan_id,
+            {"type": "scan.eta", "etaSeconds": min(900, max(1, len(prompts)) * wave_count * 35)},
+        )
 
+        wave1_ids: list[str] = []
+        wave2_ids: list[str] = []
         runs_enqueued = 0
         for p in prompts:
             for e in eng_list:
@@ -280,6 +460,7 @@ def fan_out_scan_task(scan_id: str) -> str:
                     eng = EngineType(e)
                 except ValueError:
                     continue
+                eng_key = eng.value
                 run = EngineRun(
                     tenant_id=brand.tenant_id,
                     prompt_id=p.id,
@@ -288,11 +469,16 @@ def fan_out_scan_task(scan_id: str) -> str:
                     scan_id=scan.id,
                 )
                 db.add(run)
-                db.commit()
-                # Must commit before enqueue: run_engine uses its own session and cannot see
-                # uncommitted rows; eager mode runs immediately (no time for a final batch commit).
-                run_engine_task.delay(str(run.id))
+                db.flush()
+                rid = str(run.id)
+                if wave_for_engine(eng_key) == 1:
+                    wave1_ids.append(rid)
+                else:
+                    wave2_ids.append(rid)
                 runs_enqueued += 1
+        db.commit()
+        if runs_enqueued > 0:
+            run_scan_engine_waves_task.delay(scan_id, wave1_ids, wave2_ids)
 
         if runs_enqueued == 0:
             # No `EngineRun` rows → `maybe_complete_scan` can never finish (expected > 0, total == 0).

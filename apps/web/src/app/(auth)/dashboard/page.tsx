@@ -23,6 +23,10 @@ import { ExternalLink } from "lucide-react";
 import { Card, ErrorState, Skeleton } from "@/components/primitives";
 import { CitationHeatmap } from "@/components/report/CitationHeatmap";
 import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
+import { CompetitorRoster } from "@/components/report/CompetitorRoster";
+import { CompetitorDiscovery } from "@/components/report/CompetitorDiscovery";
+import { CompetitorEngineCitations } from "@/components/report/CompetitorEngineCitations";
+import { rosterFromReport } from "@/lib/competitorRoster";
 import { apiFetch } from "@/lib/api";
 import { DASHBOARD_LAST_SCAN_STORAGE_KEY } from "@/lib/dashboardScanPreference";
 import { engineTitle } from "@/lib/engineDisplay";
@@ -441,6 +445,7 @@ function ScanDashboard({ data, linkedFromLanding }: { data: ReportData; linkedFr
   const engines = data.engines ?? [];
   const chartRows = engineMixFromMatrix(cells, engines);
   const tableRows = citationsFromMatrixCells(cells);
+  const roster = rosterFromReport(data);
   const sovPct =
     data.breakdown != null ? `${Math.round(data.breakdown.brand_share * 100)}%` : "—";
   const brandDisplayName = data.brand?.name ?? urlHostFromSubmitted(data.submitted_url);
@@ -474,7 +479,40 @@ function ScanDashboard({ data, linkedFromLanding }: { data: ReportData; linkedFr
         mixFootnote="Citations captured per engine from the matrix above"
         tableRows={tableRows}
         beforeCitations={
-          <div className="max-w-6xl">
+          <div className="max-w-6xl space-y-6">
+            {(roster.userProvided.length > 0 || roster.analysis.length > 0) ? (
+              <Card className="border-tr-line p-5">
+                <h2 className="font-display text-lg font-bold text-tr-navy">Tracked competitors</h2>
+                <p className="mt-1 text-sm text-tr-mute">
+                  AI analysis and companies you entered — scroll to browse.
+                </p>
+                <div className="mt-4 max-h-[280px] overflow-y-auto overflow-x-hidden pr-1 scroll-smooth">
+                  <CompetitorRoster
+                    analysis={roster.analysis}
+                    userProvided={roster.userProvided}
+                    variant="dashboard"
+                  />
+                </div>
+              </Card>
+            ) : null}
+            <CompetitorDiscovery
+              discovery={data.competitor_discovery}
+              userProvided={roster.userProvided}
+              analysisCompetitors={roster.analysis}
+              scanStatus={data.status}
+              pending={Boolean(data.competitor_discovery_pending)}
+            />
+            <CompetitorEngineCitations
+              data={data.competitor_citation_visibility}
+              prompts={data.prompts}
+              discoveryPending={Boolean(data.competitor_discovery_pending)}
+              discoveryFailed={
+                !data.competitor_discovery &&
+                !data.competitor_discovery_pending &&
+                (data.competitor_discovery_status === "failed" ||
+                  data.competitor_discovery_status === "skipped")
+              }
+            />
             <TopGapOpportunities opportunities={data.opportunities ?? []} />
           </div>
         }

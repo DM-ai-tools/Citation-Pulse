@@ -18,6 +18,7 @@ from citationpulse.schemas.brands import (
     BrandRead,
     CitationRead,
     GapRead,
+    OpportunityListResponse,
     OpportunityRead,
     PromptBulkCreate,
     PromptRead,
@@ -31,7 +32,12 @@ from citationpulse.services.brand_dashboard import (
     parse_range_days,
 )
 from citationpulse.services.gaps import detect_gaps
-from citationpulse.services.opportunities import heat_from_grade, list_opportunities_for_brand
+from citationpulse.services.opportunities import (
+    count_opportunities_for_brand,
+    demand_pill_from_bucket,
+    heat_from_grade,
+    list_opportunities_for_brand,
+)
 from citationpulse.services.rate_limit import allow_ad_hoc_run
 from citationpulse.services.scorer import trend_citations_per_day
 from citationpulse.services.sov import compute_sov
@@ -219,15 +225,95 @@ def get_gaps(brand_id: UUID, db: DbSession, tenant: CurrentTenant):
 
 
 _OPPORTUNITY_STATUSES = frozenset({"open", "snoozed", "queued", "resolved"})
+_OPPORTUNITY_GRADES = frozenset({"A", "B", "C"})
+_OPPORTUNITY_GAP_TYPES = frozenset(
+    {
+        "absent_all",
+        "competitor_dominant",
+        "engine_specific_gap",
+        "weak_engine",
+        "refresh_content",
+        "extend_presence",
+    }
+)
 
 
-@router.get("/brands/{brand_id}/opportunities", response_model=list[OpportunityRead])
+def _opportunity_to_read(db: Session, o, *, title_cache: dict[UUID, str] | None = None) -> OpportunityRead:
+    """Hydrate one Opportunity row into the API response model.
+
+    Pulls in the prompt text (cached per-request) and the Prompt's
+    precomputed demand fields. Demand is read from ``prompts``, not from
+    the Opportunity row, so the latest refresh is reflected immediately
+    even if the nightly detect job hasn't re-run.
+    """
+    pr = None
+    if title_cache is not None and o.prompt_id in title_cache:
+        title = title_cache[o.prompt_id]
+    else:
+        pr = db.get(Prompt, o.prompt_id)
+        title = (pr.text if pr else "")[:512] or "(prompt)"
+        if title_cache is not None:
+            title_cache[o.prompt_id] = title
+    if pr is None:
+        pr = db.get(Prompt, o.prompt_id)
+    scope_val = o.scope if (o.scope or "").strip() else None
+    bucket = getattr(pr, "demand_bucket", None) if pr else None
+    return OpportunityRead(
+        id=o.id,
+        brand_id=o.brand_id,
+        prompt_id=o.prompt_id,
+        title=title,
+        gap_type=o.gap_type,
+        scope=scope_val,
+        grade=o.grade,
+        heat=heat_from_grade(o.grade),
+        opportunity_score=float(o.opportunity_score),
+        description=o.description,
+        est_volume=o.est_volume,
+        status=o.status,
+        detected_at=o.detected_at,
+        demand_score=float(pr.demand_score) if (pr and pr.demand_score is not None) else None,
+        demand_bucket=bucket,
+        demand_pill=demand_pill_from_bucket(bucket),
+        demand_source=getattr(pr, "demand_source", None) if pr else None,
+        demand_variant=getattr(pr, "demand_variant", None) if pr else None,
+        demand_raw_volume=getattr(pr, "demand_raw_volume", None) if pr else None,
+        demand_refreshed_at=getattr(pr, "demand_refreshed_at", None) if pr else None,
+    )
+
+
+@router.get("/brands/{brand_id}/opportunities")
 def list_brand_opportunities(
     brand_id: UUID,
     db: DbSession,
     tenant: CurrentTenant,
     status: str = Query("open", description="Filter: open | snoozed | queued | resolved"),
-):
+    grade: str | None = Query(None, description="Filter: A | B | C (exact match)"),
+    gap_type: str | None = Query(
+        None,
+        description=(
+            "Filter by gap pattern. One of: absent_all | competitor_dominant "
+            "| engine_specific_gap | weak_engine | refresh_content | extend_presence"
+        ),
+    ),
+    limit: int = Query(100, ge=1, le=500, description="Page size (max 500)"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    paginated: bool = Query(
+        False,
+        description="When true, response is {items, total, limit, offset, has_more}. Default is a flat list for back-compat.",
+    ),
+) -> list[OpportunityRead] | OpportunityListResponse:
+    """List Top Gap Opportunities for a brand.
+
+    Sort order (per spec):
+        1. Grade A → B → C
+        2. opportunity_score DESC
+        3. detected_at DESC (tiebreaker)
+
+    The endpoint is a **read-only view of precomputed rows** — it does NOT
+    run the gap classifier or call DataForSEO. Schedule ``detect_opportunities``
+    (nightly) and ``refresh_demand`` (weekly) to keep the table fresh.
+    """
     b = db.get(Brand, brand_id)
     if not b or b.tenant_id != tenant.id:
         raise HTTPException(status_code=404, detail="Brand not found")
@@ -236,30 +322,42 @@ def list_brand_opportunities(
             status_code=400,
             detail=f"Invalid status; use one of: {', '.join(sorted(_OPPORTUNITY_STATUSES))}",
         )
-    rows = list_opportunities_for_brand(db, b.id, status=status)
-    out: list[OpportunityRead] = []
-    for o in rows:
-        pr = db.get(Prompt, o.prompt_id)
-        title = (pr.text if pr else "")[:512] or "(prompt)"
-        scope_val = o.scope if (o.scope or "").strip() else None
-        out.append(
-            OpportunityRead(
-                id=o.id,
-                brand_id=o.brand_id,
-                prompt_id=o.prompt_id,
-                title=title,
-                gap_type=o.gap_type,
-                scope=scope_val,
-                grade=o.grade,
-                heat=heat_from_grade(o.grade),
-                opportunity_score=float(o.opportunity_score),
-                description=o.description,
-                est_volume=o.est_volume,
-                status=o.status,
-                detected_at=o.detected_at,
-            )
+    if grade is not None and grade.upper() not in _OPPORTUNITY_GRADES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid grade; use one of: {', '.join(sorted(_OPPORTUNITY_GRADES))}",
         )
-    return out
+    if gap_type is not None and gap_type not in _OPPORTUNITY_GAP_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid gap_type; use one of: {', '.join(sorted(_OPPORTUNITY_GAP_TYPES))}",
+        )
+
+    rows = list_opportunities_for_brand(
+        db,
+        b.id,
+        status=status,
+        grade=grade,
+        gap_type=gap_type,
+        limit=limit,
+        offset=offset,
+    )
+    title_cache: dict[UUID, str] = {}
+    items = [_opportunity_to_read(db, o, title_cache=title_cache) for o in rows]
+
+    if not paginated:
+        return items
+
+    total = count_opportunities_for_brand(
+        db, b.id, status=status, grade=grade, gap_type=gap_type
+    )
+    return OpportunityListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=(offset + len(items)) < total,
+    )
 
 
 @router.get("/brands/{brand_id}/engine-mix")

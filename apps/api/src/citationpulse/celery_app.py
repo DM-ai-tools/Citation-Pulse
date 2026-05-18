@@ -46,6 +46,7 @@ celery_app.conf.update(
         "citationpulse.canary": {"queue": "default"},
         "citationpulse.fan_out_brand": {"queue": "default"},
         "citationpulse.fan_out_scan": {"queue": "default"},
+        "citationpulse.competitor_discovery_for_scan": {"queue": "default"},
         "citationpulse.daily_beat": {"queue": "default"},
         "citationpulse.detect_opportunities": {"queue": "default"},
     },

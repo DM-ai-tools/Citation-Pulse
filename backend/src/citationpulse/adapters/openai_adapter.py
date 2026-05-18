@@ -1,9 +1,4 @@
-"""ChatGPT engine adapter.
-
-Routed through OpenRouter (`openai/gpt-4o-mini:online` by default). The `:online`
-suffix activates OpenRouter's web-search plugin so we get URL citations even
-though gpt-4o-mini has no native browsing tool.
-"""
+"""ChatGPT engine adapter — direct OpenAI API when configured, else OpenRouter."""
 
 from __future__ import annotations
 
@@ -13,6 +8,8 @@ from typing import Any
 from citationpulse.adapters.base import BaseEngineAdapter, EngineResponse, RawCitation
 from citationpulse.core.config import get_settings
 from citationpulse.models.domain import EngineType
+from citationpulse.services.direct_llm import openai_chat_completion
+from citationpulse.services.engine_routing import engine_route
 from citationpulse.services.llm_router import LLMConfigError, get_router, openrouter_configured
 from citationpulse.storage.r2 import upload_openrouter_response_raw
 
@@ -24,25 +21,26 @@ class OpenAIChatGPTAdapter(BaseEngineAdapter):
     async def run(self, prompt: str, locale: str, run_ctx: dict[str, Any]) -> EngineResponse:
         settings = get_settings()
         t0 = time.perf_counter()
-        if not openrouter_configured(settings):
+        route = engine_route(EngineType.CHATGPT.value, settings)
+        if route == "unconfigured":
             return EngineResponse("", [], "", int((time.perf_counter() - t0) * 1000), None)
 
-        # Legacy override (`OPENAI_MODEL=`) wins if explicitly set.
-        model = settings.openai_model or settings.chatgpt_model
+        messages = [{"role": "user", "content": f"[{locale}] {prompt}"}]
         try:
-            resp = await get_router().chat_completion(
-                model=model,
-                messages=[{"role": "user", "content": f"[{locale}] {prompt}"}],
-            )
+            if route == "openai_direct":
+                resp = await openai_chat_completion(messages=messages, settings=settings)
+                key = f"raw/{run_ctx.get('run_id', 'unknown')}/openai_chatgpt.json"
+            else:
+                if not openrouter_configured(settings):
+                    return EngineResponse("", [], "", int((time.perf_counter() - t0) * 1000), None)
+                model = settings.openai_model or settings.chatgpt_model
+                resp = await get_router().chat_completion(model=model, messages=messages)
+                key = f"raw/{run_ctx.get('run_id', 'unknown')}/openrouter_chatgpt.json"
         except LLMConfigError:
             return EngineResponse("", [], "", int((time.perf_counter() - t0) * 1000), None)
 
-        key = f"raw/{run_ctx.get('run_id','unknown')}/openrouter_chatgpt.json"
         upload_openrouter_response_raw(key, resp.raw)
-        cites = [
-            RawCitation(url=c.url, snippet=c.snippet, position=c.position)
-            for c in resp.citations
-        ]
+        cites = [RawCitation(url=c.url, snippet=c.snippet, position=c.position) for c in resp.citations]
         return EngineResponse(
             answer_text=resp.text,
             citations=cites,

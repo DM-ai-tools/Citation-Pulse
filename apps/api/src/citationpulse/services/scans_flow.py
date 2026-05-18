@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from citationpulse.core.config import get_settings
-from citationpulse.services.llm_router import openrouter_configured
+from citationpulse.services.engine_routing import engine_can_run
 from citationpulse.models.domain import (
     Brand,
     Citation,
@@ -22,13 +22,12 @@ from citationpulse.models.domain import (
     default_engines,
 )
 from citationpulse.services.events import publish_scan_event
+from citationpulse.services.normalization import registrable_domain
 
 ANON_TENANT_MARKER = "anonymous_scans"
 _log = logging.getLogger(__name__)
 
 
-# All supported engines are routed through OpenRouter, so a single API key
-# enables all of them.
 _LLM_ENGINES: frozenset[str] = frozenset(
     {
         EngineType.CHATGPT.value,
@@ -40,29 +39,15 @@ _LLM_ENGINES: frozenset[str] = frozenset(
 
 
 def available_engines(requested: list[str] | None = None) -> list[str]:
-    """Filter engines to those that can actually run given current config.
-
-    With OpenRouter as the unified gateway, all supported engines share a
-    single `OPENROUTER_API_KEY`. If the key is missing we drop those engines
-    from the requested list.
-
-    Strategy:
-      * Start from `requested` if the caller passed one, else `default_engines()`.
-      * Drop LLM engines if `OPENROUTER_API_KEY` is empty.
-      * If filtering would leave us with nothing, fall back to the unfiltered
-        list so the scan still runs and the UI surfaces visible "missing key"
-        errors per engine instead of silently producing an empty matrix.
-    """
+    """Filter engines to those with a configured route (direct key or OpenRouter)."""
     base = list(requested) if requested else default_engines()
     settings = get_settings()
-    has_openrouter = openrouter_configured(settings)
     kept: list[str] = []
     for e in base:
-        # Product scans use OpenRouter-backed engines only; Google AI Overviews (Playwright) is not required.
         if e == EngineType.GOOGLE_AIO.value:
             continue
         if e in _LLM_ENGINES:
-            if has_openrouter:
+            if engine_can_run(e, settings):
                 kept.append(e)
             continue
         kept.append(e)
@@ -180,7 +165,6 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
                 sync_prompt_volumes_for_brand,
             )
 
-            # Fetch DataForSEO keyword volumes before scoring so est_volume is populated.
             sync_prompt_volumes_for_brand(db, brand_id_for_detect)
             detect_opportunities_for_brand(db, brand_id_for_detect, engines_override=engines_ov)
         except Exception:
@@ -373,7 +357,17 @@ def build_scan_snapshot(db: Session, scan: Scan) -> dict[str, object]:
         "prompts": [{"id": str(p.id), "text": p.text, "locale": p.locale} for p in prompts],
         "matrix": {"cells": cells},
         "progress": {"per_engine": per_engine},
+        "competitor_discovery": (
+            scan.competitor_discovery if isinstance(scan.competitor_discovery, dict) else None
+        ),
+        "competitor_discovery_pending": _snapshot_discovery_pending(scan),
     }
+
+
+def _snapshot_discovery_pending(scan: Scan) -> bool:
+    from citationpulse.services.competitor_discovery_scan import competitor_discovery_pending
+
+    return competitor_discovery_pending(scan)
 
 
 def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
@@ -478,11 +472,105 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
                 }
             )
 
+    from citationpulse.services.competitor_discovery_scan import (
+        competitor_discovery_for_report,
+        competitor_discovery_pending,
+    )
+
+    competitor_discovery = competitor_discovery_for_report(scan) if scan.status == "completed" else None
+
+    user_provided_competitors: list[dict[str, object]] = []
+    params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+    for row in params.get("user_provided_competitors") or []:
+        if isinstance(row, dict) and row.get("domain"):
+            user_provided_competitors.append(
+                {
+                    "domain": str(row["domain"]),
+                    "name": str(row.get("name") or row["domain"]),
+                    "level": "user_provided",
+                    "tier": "You provided",
+                    "source": "user",
+                }
+            )
+    if not user_provided_competitors and competitors:
+        for c in competitors:
+            dom_raw = (c.get("domains") or "").split(",")[0].strip() or c.get("name", "")
+            dom = registrable_domain(
+                dom_raw if str(dom_raw).startswith("http") else f"https://{dom_raw}"
+            )
+            if dom:
+                user_provided_competitors.append(
+                    {
+                        "domain": dom,
+                        "name": str(c.get("name") or dom),
+                        "level": "user_provided",
+                        "tier": "You provided",
+                        "source": "user",
+                    }
+                )
+
+    analysis_competitors: list[dict[str, object]] = []
+    if isinstance(competitor_discovery, dict):
+        for row in competitor_discovery.get("same_level_competitors") or []:
+            if isinstance(row, dict) and row.get("domain"):
+                analysis_competitors.append(
+                    {
+                        "domain": str(row["domain"]),
+                        "name": str(row.get("name") or row["domain"]),
+                        "level": "same_level",
+                        "tier": str(row.get("tier") or ""),
+                        "rank": row.get("rank"),
+                        "source": "analysis",
+                    }
+                )
+        for row in competitor_discovery.get("one_level_above_competitors") or []:
+            if isinstance(row, dict) and row.get("domain"):
+                analysis_competitors.append(
+                    {
+                        "domain": str(row["domain"]),
+                        "name": str(row.get("name") or row["domain"]),
+                        "level": "one_level_above",
+                        "tier": str(row.get("tier") or ""),
+                        "rank": row.get("rank"),
+                        "source": "analysis",
+                    }
+                )
+
+    competitor_citation_visibility: dict[str, object] | None = None
+    brand_for_visibility = db.get(Brand, scan.brand_id) if scan.brand_id else None
+    has_user_competitors = bool(brand_for_visibility and brand_for_visibility.competitors)
+    if scan.status == "completed" and (competitor_discovery or has_user_competitors):
+        from citationpulse.services.competitor_citation_visibility import (
+            build_competitor_citation_visibility,
+            reclassify_scan_citations,
+        )
+
+        reclassify_scan_citations(db, scan)
+        snap = build_scan_snapshot(db, scan)
+        competitor_citation_visibility = build_competitor_citation_visibility(
+            db,
+            scan,
+            cells=list((snap.get("matrix") or {}).get("cells") or []),
+            engines=list(snap.get("engines") or []),
+            competitor_discovery=competitor_discovery,
+            prompts=list(snap.get("prompts") or []),
+        )
+
     return {
         **snap,
         "gaps": gaps[:50],
         "breakdown": breakdown,
         "competitors": competitors,
+        "competitor_discovery": competitor_discovery,
+        "competitor_discovery_pending": competitor_discovery_pending(scan),
+        "competitor_discovery_status": (
+            (scan.discovery_params or {}).get("discovery_status")
+            if isinstance(scan.discovery_params, dict)
+            else None
+        ),
+        "competitor_citation_visibility": competitor_citation_visibility,
+        "user_provided_competitors": user_provided_competitors,
+        "analysis_competitors": analysis_competitors,
         "sov_multi_engine": sov_multi_engine,
         "sov_multi_weekly_trend": sov_multi_weekly_trend,
         "opportunities": opportunities,

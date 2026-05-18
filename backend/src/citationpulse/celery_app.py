@@ -38,6 +38,7 @@ celery_app.conf.update(
     task_eager_propagates=_task_always_eager,
     task_routes={
         "citationpulse.run_engine": {"queue": "default"},
+        "citationpulse.run_engines_parallel": {"queue": "default"},
         "citationpulse.normalise": {"queue": "default"},
         "citationpulse.score": {"queue": "default"},
         "citationpulse.nightly_alerts": {"queue": "default"},
@@ -46,15 +47,24 @@ celery_app.conf.update(
         "citationpulse.fan_out_scan": {"queue": "default"},
         "citationpulse.daily_beat": {"queue": "default"},
         "citationpulse.detect_opportunities": {"queue": "default"},
+        "citationpulse.refresh_demand": {"queue": "default"},
     },
     beat_schedule={
         "citationpulse-daily": {
             "task": "citationpulse.daily_beat",
             "schedule": crontab(hour=2, minute=0),
         },
+        # Detect Top Gap Opportunities AFTER the normalise + score pipeline.
+        # Pipeline order:  normalise → score_cells → detect_opportunities.
         "citationpulse-detect-opportunities": {
             "task": "citationpulse.detect_opportunities",
             "schedule": crontab(hour=5, minute=0),
+        },
+        # Refresh per-prompt demand once per week (Sundays 04:00 UTC).
+        # DataForSEO lookups are cached in Redis for 7d so cost stays flat.
+        "citationpulse-refresh-demand": {
+            "task": "citationpulse.refresh_demand",
+            "schedule": crontab(day_of_week=0, hour=4, minute=0),
         },
         "citationpulse-nightly-alerts": {
             "task": "citationpulse.nightly_alerts",

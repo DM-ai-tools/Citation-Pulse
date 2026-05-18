@@ -40,3 +40,17 @@ export function engineScanRowTitle(engine: string) {
   if (engine === "claude") return "Claude (Anthropic)";
   return engineTitle(engine);
 }
+
+/** Subtitle for live scan — how this engine is routed. */
+export function engineRouteLabel(route: string | undefined) {
+  switch (route) {
+    case "openai_direct":
+      return "OpenAI API · direct";
+    case "anthropic_direct":
+      return "Anthropic API · direct";
+    case "openrouter":
+      return "OpenRouter";
+    default:
+      return "Checking keys…";
+  }
+}

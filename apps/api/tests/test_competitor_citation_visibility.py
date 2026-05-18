@@ -1,0 +1,212 @@
+"""Tests for competitor ↔ engine citation matching."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_SRC = os.path.normpath(os.path.join(_HERE, "..", "src"))
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+from citationpulse.services.competitor_citation_visibility import (  # noqa: E402
+    _collect_engine_citations,
+    _discovery_competitor_map,
+    build_competitor_citation_visibility,
+)
+
+
+def test_discovery_map_and_engine_match():
+    discovery = {
+        "same_level_competitors": [
+            {
+                "domain": "flick.com.au",
+                "name": "Flick",
+                "tier": "Tier 2",
+                "rank": 1,
+                "citation_strength_score": 0.9,
+                "reasoning": "regional",
+                "citations": [
+                    {
+                        "type": "homepage",
+                        "url": "https://flick.com.au",
+                        "evidence": "National pest control provider.",
+                    }
+                ],
+            }
+        ],
+        "one_level_above_competitors": [],
+    }
+    m = _discovery_competitor_map(discovery)
+    assert "flick.com.au" in m
+
+    cells = [
+        {
+            "engine": "chatgpt",
+            "citations": [
+                {"url": "https://www.flick.com.au/sydney", "ownership": "neutral", "position": 2},
+            ],
+        },
+        {
+            "engine": "perplexity",
+            "citations": [
+                {"url": "https://flick.com.au/", "ownership": "neutral", "position": 1},
+            ],
+        },
+    ]
+    by_dom = _collect_engine_citations(cells, engines=["chatgpt", "perplexity"])
+    assert "flick.com.au" in by_dom
+    assert len(by_dom["flick.com.au"]) == 2
+
+
+def test_build_visibility_ranks_by_engine_count():
+    discovery = {
+        "same_level_competitors": [
+            {
+                "domain": "a.com.au",
+                "name": "A",
+                "tier": "Tier 2",
+                "rank": 1,
+                "citation_strength_score": 0.5,
+                "reasoning": "a",
+                "citations": [],
+            },
+            {
+                "domain": "b.com.au",
+                "name": "B",
+                "tier": "Tier 2",
+                "rank": 2,
+                "citation_strength_score": 0.9,
+                "reasoning": "b",
+                "citations": [],
+            },
+        ],
+        "one_level_above_competitors": [],
+    }
+    cells = [
+        {"engine": "chatgpt", "citations": [{"url": "https://b.com.au", "ownership": "neutral"}]},
+        {"engine": "claude", "citations": [{"url": "https://b.com.au", "ownership": "neutral"}]},
+        {"engine": "gemini", "citations": [{"url": "https://a.com.au", "ownership": "neutral"}]},
+    ]
+
+    class _Scan:
+        brand_id = None
+
+    out = build_competitor_citation_visibility(
+        None,  # type: ignore[arg-type]
+        _Scan(),
+        cells=cells,
+        engines=["chatgpt", "claude", "gemini"],
+        competitor_discovery=discovery,
+        prompts=[{"text": "best pest control sydney"}],
+    )
+    ranked = out["ranked_competitors"]
+    assert ranked[0]["domain"] == "b.com.au"
+    assert ranked[0]["engine_count"] == 2
+    assert "citations_by_engine" in ranked[0]
+    assert len(ranked[0]["citations_by_engine"]["chatgpt"]) == 1
+
+
+def test_build_visibility_by_prompt_filters_cells():
+    discovery = {
+        "same_level_competitors": [
+            {
+                "domain": "hipages.com.au",
+                "name": "hipages",
+                "tier": "Tier 2",
+                "rank": 1,
+                "citation_strength_score": 0.8,
+                "reasoning": "marketplace",
+                "citations": [],
+            }
+        ],
+        "one_level_above_competitors": [],
+    }
+    p1, p2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+    cells = [
+        {
+            "promptId": p1,
+            "engine": "chatgpt",
+            "citations": [{"url": "https://hipages.com.au", "ownership": "neutral", "position": 1}],
+        },
+        {
+            "promptId": p2,
+            "engine": "chatgpt",
+            "citations": [],
+        },
+    ]
+
+    class _Scan:
+        brand_id = None
+
+    out = build_competitor_citation_visibility(
+        None,  # type: ignore[arg-type]
+        _Scan(),
+        cells=cells,
+        engines=["chatgpt"],
+        competitor_discovery=discovery,
+        prompts=[
+            {"id": p1, "text": "hipages vs Airtasker"},
+            {"id": p2, "text": "best tradies app"},
+        ],
+    )
+    by_prompt = out.get("by_prompt") or []
+    assert len(by_prompt) == 2
+    p1_vis = next(x for x in by_prompt if x["prompt_id"] == p1)
+    p2_vis = next(x for x in by_prompt if x["prompt_id"] == p2)
+    assert p1_vis["engine_cited_count"] == 1
+    assert p2_vis["engine_cited_count"] == 0
+
+
+def test_user_provided_competitors_included():
+    discovery = {
+        "same_level_competitors": [
+            {
+                "domain": "discovered.com.au",
+                "name": "Discovered Co",
+                "tier": "Tier 2",
+                "rank": 1,
+                "citation_strength_score": 0.7,
+                "reasoning": "ai",
+                "citations": [],
+            }
+        ],
+        "one_level_above_competitors": [],
+    }
+
+    from citationpulse.models.domain import Brand
+
+    class _MainBrand:
+        competitors = ["user-brand-id"]
+
+    class _UserBrand:
+        name = "Airtasker"
+        domains = ["airtasker.com"]
+        tenant_id = None
+
+    class _Scan:
+        brand_id = "brand-1"
+
+    class _Db:
+        def get(self, model, pk):
+            if model is Brand and pk == "brand-1":
+                return _MainBrand()
+            if model is Brand and pk == "user-brand-id":
+                return _UserBrand()
+            return None
+
+    out = build_competitor_citation_visibility(
+        _Db(),  # type: ignore[arg-type]
+        _Scan(),  # type: ignore[arg-type]
+        cells=[],
+        engines=["chatgpt"],
+        competitor_discovery=discovery,
+        prompts=[],
+    )
+    domains = {r["domain"] for r in out["ranked_competitors"]}
+    assert "discovered.com.au" in domains
+    assert "airtasker.com" in domains
+    assert out["user_provided_count"] >= 1
+    user_row = next(r for r in out["ranked_competitors"] if r["domain"] == "airtasker.com")
+    assert user_row["user_provided"] is True

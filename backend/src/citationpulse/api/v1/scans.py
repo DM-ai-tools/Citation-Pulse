@@ -19,6 +19,7 @@ from citationpulse.services.brand_dashboard import parse_range_days
 from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.rate_limit import allow_anonymous_scan
+from citationpulse.services.competitor_discovery_scan import discovery_params_from_body
 from citationpulse.services.scans_flow import (
     available_engines,
     build_scan_report,
@@ -108,6 +109,16 @@ def create_scan(
     eng_list = [e for e in (requested or []) if e in {x.value for x in EngineType}] or None
     eng_list = available_engines(eng_list)
 
+    discovery_params = discovery_params_from_body(body)
+    merged_excluded = list(
+        dict.fromkeys(
+            list(discovery_params.get("excluded_competitors") or [])
+            + [c.strip() for c in body.competitors if c.strip()]
+        )
+    )
+    if merged_excluded:
+        discovery_params["excluded_competitors"] = merged_excluded
+
     scan = Scan(
         tenant_id=tenant.id,
         brand_id=main.id,
@@ -115,6 +126,7 @@ def create_scan(
         locale=body.locale,
         engines=eng_list,
         status="queued",
+        discovery_params=discovery_params,
     )
     db.add(scan)
     db.commit()

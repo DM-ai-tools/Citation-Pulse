@@ -19,6 +19,7 @@ from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unr
 from citationpulse.services.rate_limit import allow_anonymous_scan
 from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.brand_dashboard import parse_range_days
+from citationpulse.services.competitor_discovery_scan import discovery_params_from_body
 from citationpulse.services.scans_flow import (
     available_engines,
     build_scan_report,
@@ -29,17 +30,17 @@ from citationpulse.services.sov_entities import (
     multi_entity_weekly_share_trend,
     multientity_sov_by_engine,
 )
-from citationpulse.tasks.geo import fan_out_scan_task
+from citationpulse.tasks.geo import start_scan_task
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 _log = logging.getLogger(__name__)
 
 
-def _enqueue_fan_out_scan(scan_id: str) -> None:
+def _enqueue_start_scan(scan_id: str) -> None:
     try:
-        fan_out_scan_task.delay(scan_id)
+        start_scan_task.delay(scan_id)
     except Exception:
-        _log.exception("fan_out_scan failed scan_id=%s", scan_id)
+        _log.exception("start_scan failed scan_id=%s", scan_id)
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -108,6 +109,19 @@ def create_scan(
     eng_list = [e for e in (requested or []) if e in {x.value for x in EngineType}] or None
     eng_list = available_engines(eng_list)
 
+    discovery_params = discovery_params_from_body(body)
+    user_provided: list[dict[str, str]] = []
+    for raw in body.competitors:
+        cu = canonicalize_url(raw if raw.startswith("http") else f"https://{raw}")
+        dom = registrable_domain(cu)
+        if not dom or dom == root:
+            continue
+        user_provided.append({"domain": dom, "name": dom})
+    if user_provided:
+        discovery_params["user_provided_competitors"] = user_provided
+    if discovery_params.get("auto_discover", True):
+        discovery_params["discovery_status"] = "pending"
+
     scan = Scan(
         tenant_id=tenant.id,
         brand_id=main.id,
@@ -115,6 +129,7 @@ def create_scan(
         locale=body.locale,
         engines=eng_list,
         status="queued",
+        discovery_params=discovery_params,
     )
     db.add(scan)
     db.commit()
@@ -122,7 +137,7 @@ def create_scan(
 
     # Defer so the client gets 201 immediately; with task_always_eager (default in dev) the
     # full fan-out + engine runs still execute in this process after the response is sent.
-    background_tasks.add_task(_enqueue_fan_out_scan, str(scan.id))
+    background_tasks.add_task(_enqueue_start_scan, str(scan.id))
     return ScanCreateResponse(scan_id=str(scan.id))
 
 

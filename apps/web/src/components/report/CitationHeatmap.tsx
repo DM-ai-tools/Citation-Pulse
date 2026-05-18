@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { engineTitle } from "@/lib/engineDisplay";
@@ -14,6 +15,12 @@ const ENGINE_SUB: Record<string, string> = {
 
 function cellFor(cells: MatrixCell[], promptId: string, engine: string): MatrixCell | undefined {
   return cells.find((c) => c.promptId === promptId && c.engine === engine);
+}
+
+function truncatePrompt(text: string, max = 44): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
 }
 
 function ReportMatrixCell({ cell, mode }: { cell: MatrixCell | undefined; mode: "live" | "final" }) {
@@ -168,6 +175,9 @@ export function CitationHeatmap({
   title,
   layerLabel,
   layout = "default",
+  promptToggle = false,
+  selectedPromptId: selectedPromptIdProp,
+  onPromptSelect,
 }: {
   prompts: { id: string; text: string }[];
   engines: string[];
@@ -178,14 +188,91 @@ export function CitationHeatmap({
   layerLabel?: string | null;
   /** `report` matches full-report HTML mock (grid, card chrome). */
   layout?: "default" | "report";
+  /** When true and multiple prompts, show tabs and one prompt row at a time. */
+  promptToggle?: boolean;
+  selectedPromptId?: string | null;
+  onPromptSelect?: (promptId: string) => void;
 }) {
+  const showPromptToggle = promptToggle && prompts.length > 1;
+  const [internalPromptId, setInternalPromptId] = useState<string | null>(prompts[0]?.id ?? null);
+
+  useEffect(() => {
+    if (!showPromptToggle) return;
+    if (prompts.length === 0) {
+      setInternalPromptId(null);
+      return;
+    }
+    const ids = new Set(prompts.map((p) => p.id));
+    const controlled = selectedPromptIdProp ?? null;
+    if (controlled && ids.has(controlled)) return;
+    if (internalPromptId && ids.has(internalPromptId)) return;
+    setInternalPromptId(prompts[0].id);
+  }, [showPromptToggle, prompts, selectedPromptIdProp, internalPromptId]);
+
+  const activePromptId =
+    (showPromptToggle ? selectedPromptIdProp ?? internalPromptId : null) ?? prompts[0]?.id ?? null;
+
+  const selectPrompt = (id: string) => {
+    if (!showPromptToggle) return;
+    onPromptSelect?.(id);
+    if (selectedPromptIdProp === undefined) setInternalPromptId(id);
+  };
+
+  const visiblePrompts =
+    showPromptToggle && activePromptId
+      ? prompts.filter((p) => p.id === activePromptId)
+      : prompts;
+
+  const activePrompt = visiblePrompts[0] ?? prompts[0];
+
   /** Fluid columns: prompt column shares space with engines; minmax(0,1fr) allows shrink without horizontal scroll. */
   const colTemplate =
     engines.length > 0
-      ? `minmax(72px, 1.25fr) repeat(${engines.length}, minmax(0, 1fr))`
+      ? showPromptToggle
+        ? `repeat(${engines.length}, minmax(0, 1fr))`
+        : `minmax(72px, 1.25fr) repeat(${engines.length}, minmax(0, 1fr))`
       : "minmax(0, 1fr)";
 
   const engineColPct = engines.length > 0 ? (100 - 30) / engines.length : 0;
+
+  const promptToggleBar =
+    showPromptToggle && layout === "report" ? (
+      <div
+        className="border-b border-tr-line bg-[#F8FCFA] px-[22px] py-3"
+        role="tablist"
+        aria-label="Select prompt"
+      >
+        <p className="mb-2 font-display text-[10px] font-extrabold uppercase tracking-[1.1px] text-tr-teal">
+          Prompt
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          {prompts.map((p, i) => {
+            const active = p.id === activePromptId;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => selectPrompt(p.id)}
+                className={cn(
+                  "min-w-0 flex-1 rounded-lg border-[1.5px] px-3 py-2.5 text-left font-display text-[12px] font-bold leading-snug transition sm:max-w-[calc(33.333%-0.5rem)] sm:flex-none sm:basis-[calc(33.333%-0.5rem)]",
+                  active
+                    ? "border-tr-navy bg-tr-navy text-white shadow-sm"
+                    : "border-tr-line bg-white text-tr-navy hover:border-brand-primary hover:text-brand-primary",
+                )}
+              >
+                <span className="mr-1.5 opacity-80">{i + 1}.</span>
+                <span className="line-clamp-2 break-words">{truncatePrompt(p.text, 56)}</span>
+              </button>
+            );
+          })}
+        </div>
+        {activePrompt ? (
+          <p className="mt-3 text-[13px] font-semibold leading-snug text-tr-navy">{activePrompt.text}</p>
+        ) : null}
+      </div>
+    ) : null;
 
   const headerTitle =
     title !== undefined ? (
@@ -207,7 +294,9 @@ export function CitationHeatmap({
           ) : null}
         </h3>
         <p className={cn("text-xs", layout === "report" ? "text-tr-mute" : "text-slate-500")}>
-          {prompts.length} prompts · {engines.length} engine layers
+          {showPromptToggle
+            ? `Prompt ${Math.max(1, prompts.findIndex((p) => p.id === activePromptId) + 1)} of ${prompts.length} · ${engines.length} engines`
+            : `${prompts.length} prompts · ${engines.length} engine layers`}
         </p>
       </div>
     ) : null;
@@ -216,10 +305,11 @@ export function CitationHeatmap({
     return (
       <div className="overflow-hidden rounded-[18px] border border-tr-line bg-white shadow-[0_8px_30px_rgba(10,37,64,0.06)]">
         {headerTitle}
+        {promptToggleBar}
         <div className="min-h-[200px] overflow-hidden bg-[#F4FCF7] p-3 sm:min-h-[280px] sm:p-[22px]">
           <div className="w-full min-w-0">
             <div className="mb-2 grid min-w-0 gap-1 px-0.5 sm:gap-2 sm:px-1.5" style={{ gridTemplateColumns: colTemplate }}>
-              <div className="min-w-0" />
+              {!showPromptToggle ? <div className="min-w-0" /> : null}
               {engines.map((e) => (
                 <div key={e} className="min-w-0 pb-1.5 text-center sm:pb-2">
                   <p className="font-display text-[9px] font-extrabold uppercase leading-tight tracking-wide text-tr-navy sm:text-[10.5px]">
@@ -231,15 +321,17 @@ export function CitationHeatmap({
                 </div>
               ))}
             </div>
-            {prompts.map((p) => (
+            {visiblePrompts.map((p) => (
               <div
                 key={p.id}
                 className="mb-1.5 grid min-w-0 gap-1 sm:gap-2"
                 style={{ gridTemplateColumns: colTemplate }}
               >
-                <div className="flex min-w-0 items-center rounded-lg border border-tr-line bg-white px-2 py-2 text-[11px] font-semibold leading-snug text-tr-navy sm:px-3.5 sm:py-3 sm:text-[13px]">
-                  <span className="line-clamp-3 break-words">{p.text}</span>
-                </div>
+                {!showPromptToggle ? (
+                  <div className="flex min-w-0 items-center rounded-lg border border-tr-line bg-white px-2 py-2 text-[11px] font-semibold leading-snug text-tr-navy sm:px-3.5 sm:py-3 sm:text-[13px]">
+                    <span className="line-clamp-3 break-words">{p.text}</span>
+                  </div>
+                ) : null}
                 {engines.map((e) => (
                   <div key={e} className="min-w-0">
                     <ReportMatrixCell cell={cellFor(cells, p.id, e)} mode={mode} />

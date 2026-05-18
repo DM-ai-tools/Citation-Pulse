@@ -49,6 +49,10 @@ export function ScanForm({ className }: { className?: string }) {
   const [promptTags, setPromptTags] = useState<string[]>([]);
   const [promptInput, setPromptInput] = useState("");
   const [locale, setLocale] = useState("en-AU");
+  const [autoDiscover, setAutoDiscover] = useState(true);
+  const [serviceHint, setServiceHint] = useState("");
+  const [nicheHint, setNicheHint] = useState("");
+  const [locationHint, setLocationHint] = useState("");
   const [loading, setLoading] = useState(false);
 
   /** Split on commas: completed segments become tags; text after the last comma stays in the input. */
@@ -202,6 +206,10 @@ export function ScanForm({ className }: { className?: string }) {
         competitors: parsed.data.competitors.length ? parsed.data.competitors : undefined,
         prompts: parsed.data.prompts,
         locale: parsed.data.locale,
+        auto_discover_competitors: autoDiscover,
+        service: serviceHint.trim() || undefined,
+        niche: nicheHint.trim() || undefined,
+        location: locationHint.trim() || undefined,
       });
       rememberDashboardScan(res.scan_id, parsed.data.url);
       toast.success("Scan started");
@@ -248,10 +256,25 @@ export function ScanForm({ className }: { className?: string }) {
             />
           </div>
 
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-tr-line bg-white/60 px-3.5 py-3">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-tr-line text-brand-primary focus:ring-brand-primary/30"
+              checked={autoDiscover}
+              onChange={(e) => setAutoDiscover(e.target.checked)}
+            />
+            <span className="text-[13px] leading-snug text-tr-navy">
+              <span className="font-display font-bold">Auto-discover competitors</span>
+              <span className="mt-0.5 block text-tr-mute">
+                When your scan finishes, AI finds 3 same-tier peers and 3 one tier above (with cited evidence).
+              </span>
+            </span>
+          </label>
+
           <div>
             <label className="flex items-baseline justify-between font-display text-[12.5px] font-bold tracking-wide text-tr-navy">
               <span>Competitor domains (optional)</span>
-              <span className="text-xs font-medium text-tr-mute">comma-separated or Enter · up to 5</span>
+              <span className="text-xs font-medium text-tr-mute">exclude or pre-track · up to 5</span>
             </label>
             <div
               className={cn(
@@ -283,6 +306,38 @@ export function ScanForm({ className }: { className?: string }) {
               />
             </div>
           </div>
+
+          {autoDiscover ? (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className="font-display text-[12.5px] font-bold tracking-wide text-tr-navy">Service (optional)</label>
+                <input
+                  className={cn(fieldClass, "mt-1.5")}
+                  value={serviceHint}
+                  onChange={(e) => setServiceHint(e.target.value)}
+                  placeholder="e.g. AI SEO agency"
+                />
+              </div>
+              <div>
+                <label className="font-display text-[12.5px] font-bold tracking-wide text-tr-navy">Niche (optional)</label>
+                <input
+                  className={cn(fieldClass, "mt-1.5")}
+                  value={nicheHint}
+                  onChange={(e) => setNicheHint(e.target.value)}
+                  placeholder="e.g. B2B SaaS"
+                />
+              </div>
+              <div>
+                <label className="font-display text-[12.5px] font-bold tracking-wide text-tr-navy">Location (optional)</label>
+                <input
+                  className={cn(fieldClass, "mt-1.5")}
+                  value={locationHint}
+                  onChange={(e) => setLocationHint(e.target.value)}
+                  placeholder="e.g. Melbourne"
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div>
             <label className="flex items-baseline justify-between font-display text-[12.5px] font-bold tracking-wide text-tr-navy">

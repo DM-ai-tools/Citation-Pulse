@@ -30,6 +30,10 @@ export type ScanSnapshot = {
   submitted_url: string;
   locale: string;
   engines: string[];
+  /** Per-engine provider route from API (openai_direct | anthropic_direct | openrouter). */
+  engine_routes?: Record<string, string>;
+  /** parallel = all engines run concurrently; sequential = one Celery task per cell. */
+  execution_mode?: "parallel" | "sequential";
   score_overall: number | null;
   share_public?: boolean;
   share_token?: string | null;

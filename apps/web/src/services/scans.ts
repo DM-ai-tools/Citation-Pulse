@@ -10,6 +10,10 @@ export async function createScan(body: {
   prompts: string[];
   locale: string;
   engines?: string[];
+  auto_discover_competitors?: boolean;
+  service?: string;
+  niche?: string;
+  location?: string;
 }): Promise<{ scan_id: string }> {
   const r = await apiFetch("/api/v1/scans", {
     method: "POST",

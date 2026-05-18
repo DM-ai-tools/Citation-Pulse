@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from citationpulse.core.config import get_settings
-from citationpulse.services.llm_router import openrouter_configured
+from citationpulse.services.engine_routing import build_engine_routes, engine_can_run
 from citationpulse.models.domain import (
     Brand,
     Citation,
@@ -27,8 +27,6 @@ ANON_TENANT_MARKER = "anonymous_scans"
 _log = logging.getLogger(__name__)
 
 
-# All supported engines are routed through OpenRouter, so a single API key
-# enables all of them.
 _LLM_ENGINES: frozenset[str] = frozenset(
     {
         EngineType.CHATGPT.value,
@@ -40,29 +38,15 @@ _LLM_ENGINES: frozenset[str] = frozenset(
 
 
 def available_engines(requested: list[str] | None = None) -> list[str]:
-    """Filter engines to those that can actually run given current config.
-
-    With OpenRouter as the unified gateway, all supported engines share a
-    single `OPENROUTER_API_KEY`. If the key is missing we drop those engines
-    from the requested list.
-
-    Strategy:
-      * Start from `requested` if the caller passed one, else `default_engines()`.
-      * Drop LLM engines if `OPENROUTER_API_KEY` is empty.
-      * If filtering would leave us with nothing, fall back to the unfiltered
-        list so the scan still runs and the UI surfaces visible "missing key"
-        errors per engine instead of silently producing an empty matrix.
-    """
+    """Filter engines to those with a configured route (direct key or OpenRouter)."""
     base = list(requested) if requested else default_engines()
     settings = get_settings()
-    has_openrouter = openrouter_configured(settings)
     kept: list[str] = []
     for e in base:
-        # Product scans use OpenRouter-backed engines only; Google AI Overviews (Playwright) is not required.
         if e == EngineType.GOOGLE_AIO.value:
             continue
         if e in _LLM_ENGINES:
-            if has_openrouter:
+            if engine_can_run(e, settings):
                 kept.append(e)
             continue
         kept.append(e)
@@ -169,6 +153,14 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
         )
     brand_id_for_detect = scan.brand_id
     engines_ov = list(scan.engines) if scan.engines else None
+    if was_new:
+        try:
+            from citationpulse.services.competitor_discovery_scan import run_competitor_discovery_for_scan
+
+            run_competitor_discovery_for_scan(db, scan)
+            db.commit()
+        except Exception:
+            _log.exception("competitor_discovery after scan completion failed scan_id=%s", scan_id)
     if was_new and brand_id_for_detect:
         try:
             from citationpulse.services.opportunities import detect_opportunities_for_brand
@@ -356,6 +348,8 @@ def build_scan_snapshot(db: Session, scan: Scan) -> dict[str, object]:
         "submitted_url": scan.submitted_url,
         "locale": scan.locale,
         "engines": visible_engines,
+        "engine_routes": build_engine_routes(visible_engines),
+        "execution_mode": "parallel" if get_settings().scan_parallel_engines else "sequential",
         "score_overall": scan.score_overall,
         "share_public": scan.share_public,
         "share_token": scan.share_token,
@@ -464,10 +458,35 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
                 }
             )
 
+    competitor_discovery: dict[str, object] | None = None
+    if scan.status == "completed":
+        from citationpulse.services.competitor_discovery_scan import (
+            competitor_discovery_for_report,
+            run_competitor_discovery_for_scan,
+        )
+
+        competitor_discovery = competitor_discovery_for_report(scan)
+        if competitor_discovery is None and scan.discovery_params:
+            params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+            if params.get("auto_discover", True):
+                try:
+                    result = run_competitor_discovery_for_scan(db, scan)
+                    if result is not None:
+                        db.commit()
+                        competitor_discovery = result.model_dump(mode="json")
+                except Exception:
+                    _log.exception(
+                        "competitor_discovery during build_scan_report failed scan_id=%s",
+                        scan.id,
+                    )
+                else:
+                    competitor_discovery = competitor_discovery_for_report(scan)
+
     return {
         **snap,
         "gaps": gaps[:50],
         "breakdown": breakdown,
         "competitors": competitors,
+        "competitor_discovery": competitor_discovery,
         "opportunities": opportunities,
     }

@@ -58,6 +58,15 @@ def allow_ad_hoc_run(brand_id: str, limit_per_hour: int = 10) -> bool:
     return _check_and_incr(f"rl:brand_run:{brand_id}:{bucket}", limit_per_hour, 3600)
 
 
+def allow_competitor_analyze(client_ip: str, limit_per_hour: int = 12) -> bool:
+    """Token bucket per IP for POST /api/v1/competitors/analyze (hour window)."""
+    if limit_per_hour <= 0:
+        return True
+    ip = client_ip or "unknown"
+    bucket = int(time.time() // 3600)
+    return _check_and_incr(f"rl:competitor_analyze:{ip}:{bucket}", limit_per_hour, 3600)
+
+
 def gc_expired_rate_limits() -> int:
     """Best-effort housekeeping: delete expired rows. Wire to Celery beat
     (e.g. every 30 min) if the table grows large; otherwise harmless to skip."""
