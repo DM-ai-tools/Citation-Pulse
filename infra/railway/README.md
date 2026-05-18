@@ -111,6 +111,35 @@ Scans enqueue background work via **Celery** (Postgres broker). If only **API + 
 
 Verify after deploy: `GET https://<api>/health` should include `"celery_tasks_inline": true` for API-only, or `false` when using a worker with `CELERY_USE_WORKER=1`.
 
+## Stuck on "Initializing" or build >10 minutes
+
+**"Initializing"** on Railway means the image built but the deploy has not passed the **health check** yet (not the same as "Building").
+
+### Checklist
+
+1. **Use only one backend service.** If you have both `Citation-Pulse` and `Citation-Pulse-backend`, remove or pause one. Recommended:
+   - **Backend:** root `backend/`, Dockerfile `Dockerfile`, health `/health`
+   - **OR** root `apps/api/`, Dockerfile `Dockerfile`, health `/health` (not both)
+2. **Root directory must match the Dockerfile paths.**
+   - `backend/Dockerfile` → Railway **Root Directory** = `backend` (not repo root)
+   - `apps/api/Dockerfile` → Root Directory = `apps/api`
+   - `apps/web/Dockerfile` → Root Directory = `apps/web`
+3. **Link Postgres** to the backend: Variables → `DATABASE_URL` = reference to Postgres service.
+4. **Builder = DOCKERFILE** (not Railpack). If logs say `using build driver railpack`, switch to Dockerfile in service settings.
+5. **Open deploy logs** (not build only): look for `Application startup complete` or crash loops / `schema bootstrap failed`.
+6. **First Docker build** can take 10–20 minutes (Playwright + ML deps). Later builds are faster with cache.
+7. **Web:** set `NEXT_PUBLIC_API_URL` before build; redeploy with rebuild after changing it.
+
+### Recommended 3-service layout
+
+| Railway service | Root directory | Healthcheck |
+|-----------------|----------------|-------------|
+| API (backend)   | `backend` or `apps/api` | `/health` |
+| Web (frontend)  | `apps/web`     | `/` |
+| Postgres        | (plugin)       | — |
+
+Optional 4th: **worker** with root `apps/api` or `backend`, `Dockerfile.worker`, no HTTP healthcheck.
+
 ## Notes
 
 - Celery is Postgres-backed in this project (no Redis required).

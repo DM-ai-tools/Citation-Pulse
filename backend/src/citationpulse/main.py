@@ -29,7 +29,13 @@ _log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     _ = app
     s = get_settings()
-    ensure_opportunities_schema(get_engine())
+    try:
+        ensure_opportunities_schema(get_engine())
+    except Exception:
+        _log.exception(
+            "startup schema bootstrap failed — check DATABASE_URL is linked to Postgres "
+            "and uses postgresql+psycopg:// (Railway injects postgres://; we rewrite it)."
+        )
     if s.environment.lower() == "production" and not openrouter_configured(s):
         _log.warning(
             "OPENROUTER_API_KEY is empty on this service — scans will fail OpenRouter auth until set."
