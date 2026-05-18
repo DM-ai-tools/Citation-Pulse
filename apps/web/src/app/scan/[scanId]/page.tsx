@@ -6,8 +6,10 @@ import { rememberDashboardScan } from "@/lib/dashboardScanPreference";
 import { LiveCitationMatrix } from "@/components/scan/LiveCitationMatrix";
 import { ScanLiveHeader } from "@/components/scan/ScanLiveHeader";
 import { ScanProgressColumn } from "@/components/scan/ScanProgressColumn";
+import { ScanStallNotice } from "@/components/scan/ScanStallNotice";
 import { ErrorState, Skeleton } from "@/components/primitives";
 import { useScan } from "@/hooks/useScan";
+import { publicApiBaseUrl } from "@/services/apiClient";
 import { matrixAllEnginesTerminal } from "@/lib/matrixStats";
 
 export default function LiveScanPage() {
@@ -78,7 +80,14 @@ export default function LiveScanPage() {
     return (
       <div className="min-h-screen bg-[#F4FCF7] py-10">
         <div className="mx-auto max-w-[1280px] px-6">
-          <ErrorState message="Scan could not be loaded." onRetry={() => q.refetch()} />
+          <ErrorState
+            message={
+              q.error instanceof Error
+                ? `${q.error.message} (API: ${publicApiBaseUrl()})`
+                : `Scan could not be loaded. (API: ${publicApiBaseUrl()})`
+            }
+            onRetry={() => q.refetch()}
+          />
         </div>
       </div>
     );
@@ -89,6 +98,9 @@ export default function LiveScanPage() {
   return (
     <div className="min-h-screen bg-[#F4FCF7]">
       <ScanLiveHeader status={data.status} url={data.submitted_url} />
+      <div className="mx-auto max-w-[1280px] px-6">
+        <ScanStallNotice data={data} />
+      </div>
       <div className="mx-auto grid max-w-[1280px] gap-7 px-6 py-8 pb-16 lg:grid-cols-[1.05fr_1fr] lg:items-start">
         <ScanProgressColumn data={data} scanId={scanId} />
         <LiveCitationMatrix data={data} />

@@ -35,7 +35,12 @@ RUN if [ -z "${NEXT_PUBLIC_API_URL:-}" ]; then \
       echo "CitationPulse WARNING: NEXT_PUBLIC_API_URL is empty during docker build — client may call localhost. On Railway: set the variable on the Web service, then redeploy with rebuild (clear build cache if the warning persists)."; \
     else \
       echo "CitationPulse: NEXT_PUBLIC_API_URL is set for next build (length OK)."; \
-    fi && npm run build
+    fi && \
+    if [ -n "${API_PROXY_TARGET:-}" ] && [ -z "${NEXT_PUBLIC_API_URL:-}" ]; then \
+      export NEXT_PUBLIC_API_URL=same-origin; \
+      echo "CitationPulse: NEXT_PUBLIC_API_URL=same-origin (API_PROXY_TARGET set)."; \
+    fi && \
+    npm run build
 
 FROM node:22-alpine
 

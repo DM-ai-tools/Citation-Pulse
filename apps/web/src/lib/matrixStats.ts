@@ -20,6 +20,23 @@ export function promptCompletionPct(
   return Math.round((100 * done) / total);
 }
 
+/** True when every known cell is still ``queued`` (backend never started engine runs). */
+export function matrixAllCellsQueued(
+  prompts: { id: string }[],
+  engines: string[],
+  cells: MatrixCell[],
+): boolean {
+  if (!prompts.length || !engines.length) return false;
+  for (const p of prompts) {
+    for (const e of engines) {
+      const c = cells.find((x) => x.promptId === p.id && x.engine === e);
+      const st = c?.status ?? "queued";
+      if (st !== "queued") return false;
+    }
+  }
+  return true;
+}
+
 /** Every prompt × engine cell is terminal (cited / comp / none / error). */
 export function matrixAllEnginesTerminal(
   prompts: { id: string }[],

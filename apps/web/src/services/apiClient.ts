@@ -6,6 +6,15 @@ let _warnedMisconfiguredApi = false;
  * rewrites so those requests forward to FastAPI (avoids pointing the browser at the wrong
  * public hostname and getting HTML 404s for ``/brands/.../sov/...``).
  */
+function isLocalApiHost(url: string): boolean {
+  try {
+    const h = new URL(url).hostname;
+    return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
+  } catch {
+    return /localhost|127\.0\.0\.1/i.test(url);
+  }
+}
+
 function base(): string {
   const raw = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").trim();
   const mode = raw.toLowerCase();
@@ -23,21 +32,32 @@ function base(): string {
   if (u && !u.startsWith("http://") && !u.startsWith("https://")) {
     u = `https://${u}`;
   }
-  if (
-    !_warnedMisconfiguredApi &&
-    typeof window !== "undefined" &&
-    (u.includes("127.0.0.1") || u.includes("localhost")) &&
-    !/^localhost$|^127\.0\.0\.1$/i.test(window.location.hostname)
-  ) {
-    _warnedMisconfiguredApi = true;
-    console.warn(
-      "[CitationPulse] NEXT_PUBLIC_API_URL points at localhost but this page is not on localhost. " +
-        "Set NEXT_PUBLIC_API_URL to your public API URL at Next.js build time (Railway: Web service → Variables → rebuild). " +
-        "Or use NEXT_PUBLIC_API_URL=same-origin with API_PROXY_TARGET rewrites (see infra/railway/README.md). " +
-        "Otherwise the UI may call the wrong host and sections like Share of voice can 404."
-    );
+  if (typeof window !== "undefined") {
+    const pageHost = window.location.hostname;
+    const onRailway = pageHost.endsWith(".up.railway.app");
+    // Production bundle still defaults to localhost when NEXT_PUBLIC_API_URL was not set at build.
+    if (onRailway && isLocalApiHost(u)) {
+      return "";
+    }
+    if (
+      !_warnedMisconfiguredApi &&
+      isLocalApiHost(u) &&
+      !/^localhost$|^127\.0\.0\.1$/i.test(pageHost)
+    ) {
+      _warnedMisconfiguredApi = true;
+      console.warn(
+        "[CitationPulse] NEXT_PUBLIC_API_URL points at localhost but this page is not on localhost. " +
+          "Set NEXT_PUBLIC_API_URL to your public API URL at Next.js build time (Railway: Web service → Variables → rebuild). " +
+          "Or use NEXT_PUBLIC_API_URL=same-origin with API_PROXY_TARGET rewrites (see infra/railway/README.md)."
+      );
+    }
   }
   return u;
+}
+
+/** True when the UI will call the API on the same host (Next rewrites or Railway fallback). */
+export function apiUsesSameOrigin(): boolean {
+  return base() === "";
 }
 
 /** Resolved API origin (same value used for fetch). Exposed for user-facing errors — not a secret. */
