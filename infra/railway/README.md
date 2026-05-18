@@ -111,6 +111,16 @@ Scans enqueue background work via **Celery** (Postgres broker). If only **API + 
 
 Verify after deploy: `GET https://<api>/health` should include `"celery_tasks_inline": true` for API-only, or `false` when using a worker with `CELERY_USE_WORKER=1`.
 
+## Build failed: `exit code 137` during `pip install`
+
+Railway build containers often have limited RAM. **137 = process killed (out of memory).**
+
+The backend `Dockerfile` avoids upgrading pip in a separate layer and omits Playwright from core deps (install `[browser]` locally only if needed). If the build still fails:
+
+1. **Settings → Redeploy → Clear build cache**
+2. Increase the service **memory** / plan if available
+3. Confirm **Root Directory** is `backend` (not repo root with wrong `COPY` paths)
+
 ## Stuck on "Initializing" or build >10 minutes
 
 **"Initializing"** on Railway means the image built but the deploy has not passed the **health check** yet (not the same as "Building").

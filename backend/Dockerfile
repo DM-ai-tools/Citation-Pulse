@@ -1,14 +1,20 @@
+# Railway build VMs are memory-limited (~512MB–1GB). Exit 137 during `pip install` = OOM.
+# Do not run `pip install --upgrade pip` here; use the image pip and install the app once.
 FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=120
 
-# Build context: Railway service root directory must be ``backend/`` (not repo root).
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN pip install --no-cache-dir -e .
+# Non-editable install (production). Playwright is optional — not needed for LLM scan engines.
+RUN pip install --no-cache-dir --no-compile .
 
 EXPOSE 8000
 

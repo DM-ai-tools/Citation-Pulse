@@ -2,12 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir --no-compile .
 
 EXPOSE 8000
 
