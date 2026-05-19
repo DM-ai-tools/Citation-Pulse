@@ -16,6 +16,7 @@ from citationpulse.models.domain import (
     EngineType,
     Ownership,
     Prompt,
+    PromptMetrics,
     RunStatus,
     Scan,
     Tenant,
@@ -418,9 +419,15 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
         )
 
         rows = list_opportunities_for_brand(db, brand.id, status="open")
-        missing_volume = bool(rows) and any(o.est_volume is None for o in rows)
-        should_refresh = scan.status == "completed" and (
-            not rows or (missing_volume and dataforseo_configured())
+        brand_prompts = list(
+            db.scalars(select(Prompt).where(Prompt.brand_id == brand.id, Prompt.enabled.is_(True))).all()
+        )
+        lacks_prompt_metrics = any(
+            (m := db.get(PromptMetrics, p.id)) is None or m.est_volume is None for p in brand_prompts
+        )
+        missing_opp_volume = bool(rows) and any(o.est_volume is None for o in rows)
+        should_refresh = scan.status == "completed" and dataforseo_configured() and (
+            not rows or lacks_prompt_metrics or missing_opp_volume
         )
         if should_refresh:
             try:

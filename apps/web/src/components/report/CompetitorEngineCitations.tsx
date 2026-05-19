@@ -3,15 +3,15 @@
 import { useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 import { Spinner } from "@/components/primitives";
+import { engineTitle } from "@/lib/engineDisplay";
+import { cn } from "@/lib/utils";
+import type { CompetitorCitationVisibility, EngineCitationHit, RankedCompetitorVisibility } from "@/types/competitorVisibility";
 
 function truncatePrompt(text: string, max = 52): string {
   const t = text.trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max - 1)}…`;
 }
-import { engineTitle } from "@/lib/engineDisplay";
-import { cn } from "@/lib/utils";
-import type { CompetitorCitationVisibility, EngineCitationHit, RankedCompetitorVisibility } from "@/types/competitorVisibility";
 
 function domainHref(domain: string) {
   const d = domain.replace(/^https?:\/\//i, "").split("/")[0] ?? domain;
@@ -33,44 +33,65 @@ function urlLabel(url: string) {
 }
 
 function EngineColumn({ engine, citations }: { engine: string; citations: EngineCitationHit[] }) {
+  if (citations.length === 0) return null;
   return (
     <div className="flex min-h-[120px] flex-col rounded-lg border border-tr-line bg-white p-3">
       <h5 className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-navy">
         {engineTitle(engine)}
       </h5>
-      {citations.length === 0 ? (
-        <p className="mt-3 flex flex-1 items-center text-[11px] leading-relaxed text-tr-mute">
-          Not cited in this engine&apos;s answer for your prompt.
-        </p>
-      ) : (
-        <ul className="mt-2 space-y-2">
-          {citations.map((c, i) => (
-            <li key={`${c.url}-${i}`} className="text-[11px] leading-snug">
-              <a
-                href={c.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex items-start gap-1 font-medium text-brand-primary hover:underline"
-              >
-                <span className="min-w-0 flex-1 break-all">{urlLabel(c.url)}</span>
-                <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
-              </a>
-              {c.position != null ? (
-                <span className="mt-0.5 block text-[10px] text-tr-mute">Position #{c.position}</span>
-              ) : null}
-              {c.snippet ? (
-                <span className="mt-0.5 block line-clamp-2 text-[10px] text-tr-mute">{c.snippet}</span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="mt-2 space-y-2">
+        {citations.map((c, i) => (
+          <li key={`${c.url}-${i}`} className="text-[11px] leading-snug">
+            <a
+              href={c.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-start gap-1 font-medium text-brand-primary hover:underline"
+            >
+              <span className="min-w-0 flex-1 break-all">{urlLabel(c.url)}</span>
+              <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
+            </a>
+            {c.position != null ? (
+              <span className="mt-0.5 block text-[10px] text-tr-mute">Position #{c.position}</span>
+            ) : null}
+            {c.snippet ? (
+              <span className="mt-0.5 block line-clamp-2 text-[10px] text-tr-mute">{c.snippet}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-function CompetitorRow({ row, engines }: { row: RankedCompetitorVisibility; engines: string[] }) {
+/** Engines where this competitor has at least one citation hit (omit uncited engines). */
+function citedEnginesForRow(row: RankedCompetitorVisibility): string[] {
   const byEngine = row.citations_by_engine ?? {};
+  const fromMap = Object.entries(byEngine)
+    .filter(([, hits]) => Array.isArray(hits) && hits.length > 0)
+    .map(([eng]) => eng);
+  if (fromMap.length > 0) return fromMap.sort();
+  if (row.engines?.length) return [...row.engines];
+  return [];
+}
+
+function competitorHasEngineCitations(row: RankedCompetitorVisibility): boolean {
+  if (row.cited_by_engines) return true;
+  if ((row.engine_count ?? 0) > 0) return true;
+  if ((row.citation_count ?? 0) > 0) return true;
+  return citedEnginesForRow(row).length > 0;
+}
+
+function CompetitorRow({
+  row,
+  scanEngineCount,
+}: {
+  row: RankedCompetitorVisibility;
+  scanEngineCount: number;
+}) {
+  const byEngine = row.citations_by_engine ?? {};
+  const visibleEngines = citedEnginesForRow(row);
+  if (visibleEngines.length === 0) return null;
   const host = row.domain.replace(/^www\./i, "");
 
   return (
@@ -106,13 +127,13 @@ function CompetitorRow({ row, engines }: { row: RankedCompetitorVisibility; engi
             {tierBadge(row.tier)}
           </span>
           <span className="rounded-full bg-brand-primary/10 px-2.5 py-0.5 font-display text-[11px] font-extrabold text-brand-primary">
-            {row.visibility_score}% · {row.engine_count}/{engines.length} engines
+            {row.visibility_score}% · {row.engine_count}/{scanEngineCount} engines
           </span>
         </div>
       </header>
 
       <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-        {engines.map((eng) => (
+        {visibleEngines.map((eng) => (
           <EngineColumn
             key={eng}
             engine={eng}
@@ -162,12 +183,14 @@ export function CompetitorEngineCitations({
   const engines = viewData?.engines ?? data?.engines ?? ["chatgpt", "claude", "gemini", "perplexity"];
   const competitors = useMemo(() => {
     const rows = viewData?.competitors ?? viewData?.ranked_competitors ?? [];
-    return [...rows].sort((a, b) => {
-      const au = a.user_provided ? 0 : 1;
-      const bu = b.user_provided ? 0 : 1;
-      if (au !== bu) return au - bu;
-      return (a.visibility_rank ?? 99) - (b.visibility_rank ?? 99);
-    });
+    return [...rows]
+      .filter(competitorHasEngineCitations)
+      .sort((a, b) => {
+        const au = a.user_provided ? 0 : 1;
+        const bu = b.user_provided ? 0 : 1;
+        if (au !== bu) return au - bu;
+        return (a.visibility_rank ?? 99) - (b.visibility_rank ?? 99);
+      });
   }, [viewData]);
 
   const activePromptText =
@@ -263,7 +286,7 @@ export function CompetitorEngineCitations({
       ) : (
         <div className="space-y-4 px-[22px] py-5">
           {competitors.map((row) => (
-            <CompetitorRow key={row.domain} row={row} engines={engines} />
+            <CompetitorRow key={row.domain} row={row} scanEngineCount={engines.length} />
           ))}
         </div>
       )}

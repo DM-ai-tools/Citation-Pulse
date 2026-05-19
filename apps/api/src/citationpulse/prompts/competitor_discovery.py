@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Literal
 
+from citationpulse.services.competitor_discovery_limits import (
+    ONE_LEVEL_ABOVE_COUNT,
+    SAME_LEVEL_COUNT,
+)
+
 CompetitorType = Literal["niche_specialist", "full_stack_niche"]
 
 
@@ -71,7 +76,7 @@ geographic reach, business scale.
 ==================================================
 2. COMPETITOR EXTRACTION
 ==================================================
-Identify exactly 3 SAME-TIER competitors and exactly 3 ONE-TIER-ABOVE competitors.
+Identify exactly {SAME_LEVEL_COUNT} SAME-TIER competitors and exactly {ONE_LEVEL_ABOVE_COUNT} ONE-TIER-ABOVE competitors.
 
 Competitors must: operate in the intended market, be true service providers, have strong SEO visibility,
 match service intent, match niche intent, match business model, align with targeting filters.
@@ -135,11 +140,11 @@ If a row fails validation, replace it before finalizing.
     "company_tier": "Tier 1|Tier 2|Tier 3|Tier 4",
     "tier_reasoning": ""
   }},
-  "same_level_competitors": [ exactly 3 objects, ordered strongest-first ],
-  "one_level_above_competitors": [ exactly 3 objects, ordered strongest-first ],
+  "same_level_competitors": [ exactly {SAME_LEVEL_COUNT} objects, ordered strongest-first ],
+  "one_level_above_competitors": [ exactly {ONE_LEVEL_ABOVE_COUNT} objects, ordered strongest-first ],
   "validation_summary": {{
-    "same_level_validated": 3,
-    "one_level_above_validated": 3,
+    "same_level_validated": {SAME_LEVEL_COUNT},
+    "one_level_above_validated": {ONE_LEVEL_ABOVE_COUNT},
     "citations_verified": true,
     "excluded_domains_removed": true,
     "notes": ""
@@ -176,7 +181,7 @@ Each one_level_above_competitor:
   "citations": [ same citation shape as above ]
 }}
 
-RULES: ONLY JSON · exactly 3 + 3 competitors · real URLs only · use null for unknown metrics ·
+RULES: ONLY JSON · exactly {SAME_LEVEL_COUNT} + {ONE_LEVEL_ABOVE_COUNT} competitors · real URLs only · use null for unknown metrics ·
 never include excluded domains · prefer strong SEO-visible providers."""
 
     return [

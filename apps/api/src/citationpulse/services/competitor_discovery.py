@@ -26,12 +26,13 @@ from citationpulse.services.llm_router import (
     chat_completion_sync,
     openrouter_configured,
 )
+from citationpulse.services.competitor_discovery_limits import (
+    ONE_LEVEL_ABOVE_COUNT,
+    SAME_LEVEL_COUNT,
+)
 from citationpulse.services.normalization import registrable_domain
 
 _log = logging.getLogger(__name__)
-
-SAME_LEVEL_COUNT = 3
-ONE_LEVEL_ABOVE_COUNT = 3
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 

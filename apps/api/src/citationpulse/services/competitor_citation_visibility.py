@@ -216,11 +216,12 @@ def _build_visibility_payload(
             discovery_strength=disc_strength,
             in_discovery=in_discovery or user_provided,
         )
-        citations_by_engine: dict[str, list[dict[str, Any]]] = {e: [] for e in engines}
+        citations_by_engine: dict[str, list[dict[str, Any]]] = {}
         for h in hits:
             eng = str(h.get("engine") or "")
-            if eng in citations_by_engine:
-                citations_by_engine[eng].append(h)
+            if not eng:
+                continue
+            citations_by_engine.setdefault(eng, []).append(h)
 
         ranked.append(
             {
@@ -257,6 +258,7 @@ def _build_visibility_payload(
         row["visibility_rank"] = i
 
     discovery_only = [r for r in ranked if not r["cited_by_engines"]]
+    cited_ranked = [r for r in ranked if r["cited_by_engines"]]
     user_provided_rows = [
         {"domain": r["domain"], "name": r["name"]}
         for r in ranked
@@ -267,7 +269,7 @@ def _build_visibility_payload(
         "prompt_text": prompt_text,
         "engines": engines,
         "ranked_competitors": ranked,
-        "competitors": ranked,
+        "competitors": cited_ranked,
         "user_provided_competitors": user_provided_rows,
         "discovery_matched_count": sum(1 for r in ranked if r.get("matched_in_discovery")),
         "user_provided_count": len(user_provided_rows),

@@ -14,11 +14,10 @@ from citationpulse.services.competitor_discovery import (
     CompetitorDiscoveryError,
     analyze_competitors,
 )
+from citationpulse.services.competitor_discovery_limits import MAX_TRACKED_COMPETITOR_BRANDS
 from citationpulse.services.normalization import registrable_domain
 
 _log = logging.getLogger(__name__)
-
-_MAX_TRACKED_COMPETITORS = 5
 
 
 def _locale_to_market(locale: str) -> str:
@@ -84,7 +83,7 @@ def _ensure_competitor_brands(
     root = (main_brand.domains[0] if main_brand.domains else main_brand.name).lower()
 
     for dom in domains:
-        if len(existing_ids) >= _MAX_TRACKED_COMPETITORS:
+        if len(existing_ids) >= MAX_TRACKED_COMPETITOR_BRANDS:
             break
         if dom.lower() == root or dom.lower() in existing_domains:
             continue
@@ -94,7 +93,7 @@ def _ensure_competitor_brands(
         existing_ids.append(cb.id)
         existing_domains.add(dom.lower())
 
-    main_brand.competitors = existing_ids[:_MAX_TRACKED_COMPETITORS]
+    main_brand.competitors = existing_ids[:MAX_TRACKED_COMPETITOR_BRANDS]
     db.flush()
     return list(main_brand.competitors or [])
 

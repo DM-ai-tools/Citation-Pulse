@@ -18,6 +18,7 @@ from citationpulse.core.config import celery_run_tasks_inline, get_settings
 from citationpulse.core.observability import setup_observability
 from citationpulse.db.runtime_bootstrap import ensure_opportunities_schema
 from citationpulse.db.session import get_engine
+from citationpulse.services.dataforseo_keywords import dataforseo_configured
 from citationpulse.services.llm_router import openrouter_configured
 
 setup_observability()
@@ -124,6 +125,7 @@ def health():
     return {
         "status": "ok",
         "openrouter_configured": openrouter_configured(),
+        "dataforseo_configured": dataforseo_configured(),
         "celery_tasks_inline": celery_run_tasks_inline(),
     }
 

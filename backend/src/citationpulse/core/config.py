@@ -153,7 +153,7 @@ class Settings(BaseSettings):
 
     # Competitor discovery (POST /api/v1/competitors/analyze) — large JSON payload.
     competitor_discovery_model: str = "openai/gpt-4o-mini:online"
-    competitor_discovery_max_tokens: int = 8192
+    competitor_discovery_max_tokens: int = 12288
     competitor_analyze_rate_limit_per_hour: int = 12
     competitor_analyze_mesh_rate_limit_per_hour: int = 120
 

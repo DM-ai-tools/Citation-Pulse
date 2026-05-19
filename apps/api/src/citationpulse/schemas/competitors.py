@@ -31,7 +31,7 @@ class SameLevelCompetitor(BaseModel):
     domain: str
     name: str
     tier: str
-    rank: int | None = Field(default=None, ge=1, le=10)
+    rank: int | None = Field(default=None, ge=1, le=16)
     rank_reason: str | None = None
     similarity_score: float = Field(ge=0.0, le=1.0)
     citation_strength_score: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -45,7 +45,7 @@ class OneLevelAboveCompetitor(BaseModel):
     domain: str
     name: str
     tier: str
-    rank: int | None = Field(default=None, ge=1, le=10)
+    rank: int | None = Field(default=None, ge=1, le=16)
     rank_reason: str | None = None
     citation_strength_score: float | None = Field(default=None, ge=0.0, le=1.0)
     authority_advantage: str

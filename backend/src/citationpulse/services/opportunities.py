@@ -341,12 +341,12 @@ def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
     apps/api/services/opportunities.py so the Railway-deployed backend tree
     can populate the "Est. monthly searches" column in the funnel report.
     """
-    import re
-
     from citationpulse.services.dataforseo_keywords import (
         DataForSEOError,
         dataforseo_configured,
+        extract_volume_keyword_candidates,
         fetch_google_ads_search_volumes,
+        search_volume_from_row,
     )
 
     if not dataforseo_configured():
@@ -367,22 +367,27 @@ def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
     updated = 0
     now = datetime.now(timezone.utc)
 
-    # DataForSEO rejects question marks and a handful of punctuation chars in
-    # the `keywords` array. Strip them and collapse extra whitespace so a prompt
-    # like "what is the best seo agency?" still gets a volume back.
-    _KW_BAD = re.compile(r"[?!;:\"'()\[\]{}<>@#$%^&*\\|~`]")
-
-    def _clean_keyword(text: str) -> str:
-        cleaned = _KW_BAD.sub(" ", text[:700])
-        return " ".join(cleaned.split())
-
     for locale, locale_prompts in by_locale.items():
         # Normalise "en_AU" / "EN-au" → "en-au" for lookup
         loc_lower = locale.lower().replace("_", "-")
         location_code = _LOCALE_TO_LOCATION.get(loc_lower, _DEFAULT_LOCATION_CODE)
         language_code = loc_lower.split("-")[0] or "en"
 
-        keywords = [_clean_keyword(p.text) for p in locale_prompts]
+        prompt_candidates: dict[UUID, list[str]] = {}
+        keywords: list[str] = []
+        seen_kw: set[str] = set()
+        for p in locale_prompts:
+            cands = extract_volume_keyword_candidates(p.text)
+            prompt_candidates[p.id] = cands
+            for kw in cands:
+                key = kw.lower()
+                if key not in seen_kw:
+                    seen_kw.add(key)
+                    keywords.append(kw)
+
+        if not keywords:
+            continue
+
         try:
             rows = fetch_google_ads_search_volumes(
                 keywords,
@@ -399,20 +404,41 @@ def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
             continue
 
         vol_map: dict[str, int] = {}
+
+        def _store_volume(key: str, volume: int) -> None:
+            k = key.strip().lower()
+            if not k:
+                return
+            prev = vol_map.get(k)
+            if prev is None or volume > prev:
+                vol_map[k] = volume
+
         for row in rows:
-            kw = (row.get("keyword") or "").strip().lower()
-            sv = row.get("search_volume")
-            if kw and isinstance(sv, (int, float)) and sv >= 0:
-                vol_map[kw] = int(sv)
+            volume = search_volume_from_row(row)
+            if volume is None:
+                continue
+            for field in ("keyword", "spell"):
+                raw_key = row.get(field)
+                if isinstance(raw_key, str) and raw_key.strip():
+                    _store_volume(raw_key, volume)
 
         for p in locale_prompts:
-            kw_key = _clean_keyword(p.text).lower()
-            volume = vol_map.get(kw_key)
+            volume: int | None = None
+            for cand in prompt_candidates.get(p.id, []):
+                hit = vol_map.get(cand.lower())
+                if hit is not None and len(cand.split()) >= 2:
+                    if volume is None or hit > volume:
+                        volume = hit
             if volume is None:
-                # Fuzzy: try a prefix-overlap match when the API echoed a slightly
-                # different normalisation of our keyword.
+                for cand in prompt_candidates.get(p.id, []):
+                    hit = vol_map.get(cand.lower())
+                    if hit is not None:
+                        volume = hit
+                        break
+            if volume is None:
+                primary = (prompt_candidates.get(p.id) or [""])[0].lower()
                 for k, v in vol_map.items():
-                    if kw_key.startswith(k[:40]) or k.startswith(kw_key[:40]):
+                    if primary.startswith(k[:40]) or k.startswith(primary[:40]):
                         volume = v
                         break
             if volume is None:

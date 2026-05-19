@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Literal
 
+from citationpulse.services.competitor_discovery_limits import (
+    ONE_LEVEL_ABOVE_COUNT,
+    SAME_LEVEL_COUNT,
+)
+
 CompetitorType = Literal["niche_specialist", "full_stack_niche"]
 
 
@@ -127,8 +132,8 @@ COMPETITOR DISTRIBUTION RULES
 ==================================================
 
 You MUST return:
-- Exactly 3 competitors from the SAME company tier/level
-- Exactly 3 competitors from ONE LEVEL ABOVE the target company
+- Exactly {SAME_LEVEL_COUNT} competitors from the SAME company tier/level
+- Exactly {ONE_LEVEL_ABOVE_COUNT} competitors from ONE LEVEL ABOVE the target company
 
 Do NOT return more or fewer competitors.
 
@@ -136,7 +141,7 @@ Do NOT return more or fewer competitors.
 STEP 2 — FIND COMPETITORS
 ==================================================
 
-Find exactly 3 SAME-LEVEL and exactly 3 ONE-LEVEL-ABOVE competitors.
+Find exactly {SAME_LEVEL_COUNT} SAME-LEVEL and exactly {ONE_LEVEL_ABOVE_COUNT} ONE-LEVEL-ABOVE competitors.
 
 Competitors must:
 - Operate in {market}
@@ -169,7 +174,7 @@ If competitor_type is provided:
 STEP 3 — COMPETITOR LEVEL MATCHING
 ==================================================
 
-SAME-LEVEL competitors (exactly 3):
+SAME-LEVEL competitors (exactly {SAME_LEVEL_COUNT}):
 These competitors must closely match the target company in:
 - SEO authority
 - Geographic reach
@@ -182,7 +187,7 @@ Examples:
 - Local specialist vs local specialist
 - Regional provider vs regional provider
 
-UPPER-LEVEL competitors (exactly 3):
+UPPER-LEVEL competitors (exactly {ONE_LEVEL_ABOVE_COUNT}):
 These competitors must be exactly ONE tier stronger than the target company.
 
 They should demonstrate:
@@ -231,8 +236,8 @@ Structure:
     "company_tier": "",
     "tier_reasoning": ""
   }},
-  "same_level_competitors": [3 items exactly — each with domain, name, tier, similarity_score, avg_position, intersections, reasoning, citations],
-  "one_level_above_competitors": [3 items exactly — each with domain, name, tier, authority_advantage, reasoning, citations]
+  "same_level_competitors": [{SAME_LEVEL_COUNT} items exactly — each with domain, name, tier, similarity_score, avg_position, intersections, reasoning, citations],
+  "one_level_above_competitors": [{ONE_LEVEL_ABOVE_COUNT} items exactly — each with domain, name, tier, authority_advantage, reasoning, citations]
 }}
 
 Each same_level_competitor object:
@@ -266,8 +271,8 @@ IMPORTANT RULES
 - No explanations
 - No commentary
 - No extra text
-- Exactly 3 same_level_competitors
-- Exactly 3 one_level_above_competitors
+- Exactly {SAME_LEVEL_COUNT} same_level_competitors
+- Exactly {ONE_LEVEL_ABOVE_COUNT} one_level_above_competitors
 - Use null where data is unavailable
 - Never include excluded competitors
 - Prefer companies with strong SEO visibility
