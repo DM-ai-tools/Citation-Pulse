@@ -2,6 +2,8 @@
 
 Canonical services use **`apps/api`** and **`apps/web`** (not legacy `backend/` / `frontend/`).
 
+If you still deploy from **`backend/`** (Dockerfile path `/backend/Dockerfile`), keep that folder in sync with `apps/api` or switch the service **Root directory** to `apps/api` and Dockerfile to `Dockerfile`.
+
 ## Services
 
 | Service | Root directory | Dockerfile | Config |

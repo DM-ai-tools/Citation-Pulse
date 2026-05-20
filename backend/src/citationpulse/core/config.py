@@ -7,11 +7,10 @@ from pathlib import Path
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from citationpulse.core.paths import resolve_app_roots
 from citationpulse.db.urls import normalize_database_url
 
-# apps/api/src/citationpulse/core/config.py → repo root is parents[5]
-_REPO_ROOT = Path(__file__).resolve().parents[5]
-_API_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT, _API_ROOT = resolve_app_roots(Path(__file__))
 
 
 def _settings_env_files() -> tuple[str, ...]:

@@ -14,6 +14,7 @@ class CompetitorCitation(BaseModel):
     type: str
     url: str
     evidence: str
+    relevance_score: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class TargetCompanyAnalysis(BaseModel):
@@ -30,7 +31,10 @@ class SameLevelCompetitor(BaseModel):
     domain: str
     name: str
     tier: str
+    rank: int | None = Field(default=None, ge=1, le=10)
+    rank_reason: str | None = None
     similarity_score: float = Field(ge=0.0, le=1.0)
+    citation_strength_score: float | None = Field(default=None, ge=0.0, le=1.0)
     avg_position: float | None = None
     intersections: int | None = None
     reasoning: str
@@ -41,15 +45,27 @@ class OneLevelAboveCompetitor(BaseModel):
     domain: str
     name: str
     tier: str
+    rank: int | None = Field(default=None, ge=1, le=10)
+    rank_reason: str | None = None
+    citation_strength_score: float | None = Field(default=None, ge=0.0, le=1.0)
     authority_advantage: str
     reasoning: str
     citations: list[CompetitorCitation] = Field(default_factory=list)
+
+
+class DiscoveryValidationSummary(BaseModel):
+    same_level_validated: int = 0
+    one_level_above_validated: int = 0
+    citations_verified: bool = True
+    excluded_domains_removed: bool = True
+    notes: str = ""
 
 
 class CompetitorDiscoveryResult(BaseModel):
     target_company: TargetCompanyAnalysis
     same_level_competitors: list[SameLevelCompetitor]
     one_level_above_competitors: list[OneLevelAboveCompetitor]
+    validation_summary: DiscoveryValidationSummary | None = None
 
 
 class CompetitorAnalyzeRequest(BaseModel):
