@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS opportunities (
 CREATE INDEX IF NOT EXISTS ix_opportunities_brand_status_score
   ON opportunities (brand_id, status, opportunity_score DESC)
 """.strip(),
+    """
+ALTER TABLE opportunities
+  ADD COLUMN IF NOT EXISTS detail_expansion text NULL
+""".strip(),
 )
 
 _SCAN_COMPETITOR_DDL: tuple[str, ...] = (
@@ -63,6 +67,57 @@ ALTER TABLE scans
 )
 
 
+_AUTH_DDL: tuple[str, ...] = (
+    """
+CREATE TABLE IF NOT EXISTS users (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name varchar(256) NOT NULL,
+  email varchar(320) NOT NULL,
+  password_hash varchar(512) NOT NULL,
+  role varchar(32) NOT NULL DEFAULT 'user',
+  tenant_id uuid NULL REFERENCES tenants(id) ON DELETE SET NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  last_login_at timestamptz NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_users_email UNIQUE (email),
+  CONSTRAINT ck_users_role CHECK (role IN ('user','admin'))
+)
+""".strip(),
+    "CREATE INDEX IF NOT EXISTS ix_users_email ON users (email)",
+    """
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash varchar(128) NOT NULL UNIQUE,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+)
+""".strip(),
+    "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_id ON user_sessions (user_id)",
+    """
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_user_id uuid NULL REFERENCES users(id) ON DELETE SET NULL,
+  action varchar(128) NOT NULL,
+  target_type varchar(64) NULL,
+  target_id varchar(128) NULL,
+  details jsonb NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now()
+)
+""".strip(),
+    "CREATE INDEX IF NOT EXISTS ix_admin_audit_logs_action ON admin_audit_logs (action)",
+    """
+CREATE TABLE IF NOT EXISTS system_settings (
+  key varchar(128) PRIMARY KEY,
+  value jsonb NOT NULL DEFAULT '{}',
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by_user_id uuid NULL REFERENCES users(id) ON DELETE SET NULL
+)
+""".strip(),
+)
+
+
 def ensure_opportunities_schema(engine: Engine) -> None:
     if engine.dialect.name != "postgresql":
         return
@@ -72,6 +127,11 @@ def ensure_opportunities_schema(engine: Engine) -> None:
                 conn.execute(text(stmt))
             for stmt in _SCAN_COMPETITOR_DDL:
                 conn.execute(text(stmt))
+            for stmt in _AUTH_DDL:
+                conn.execute(text(stmt))
     except Exception:
         _log.exception("runtime schema bootstrap (opportunities) failed")
-        raise
+
+
+def ensure_auth_schema(engine: Engine) -> None:
+    ensure_opportunities_schema(engine)

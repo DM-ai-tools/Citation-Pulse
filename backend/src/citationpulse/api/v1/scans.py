@@ -15,10 +15,10 @@ from citationpulse.core.config import get_settings
 from citationpulse.db.session import SessionLocal
 from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent, all_engines
 from citationpulse.schemas.scans import ScanCreate, ScanCreateResponse, ShareBody
-from citationpulse.services.brand_dashboard import parse_range_days
 from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
-from citationpulse.services.normalization import canonicalize_url, registrable_domain
 from citationpulse.services.rate_limit import allow_anonymous_scan
+from citationpulse.services.normalization import canonicalize_url, ensure_https_url, registrable_domain
+from citationpulse.services.brand_dashboard import parse_range_days
 from citationpulse.services.competitor_discovery_scan import discovery_params_from_body
 from citationpulse.services.scans_flow import (
     available_engines,
@@ -51,7 +51,6 @@ def _enqueue_start_scan(scan_id: str) -> None:
         except Exception:
             _log.exception("start_scan inline apply failed scan_id=%s", scan_id)
 
-
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
@@ -71,12 +70,13 @@ def create_scan(
     rl_key = ip
     rl_limit = settings.anonymous_scan_rate_limit_per_hour
     if is_mesh_or_unresolved_client_ip(ip):
+        # Avoid bucketing the whole world behind Railway's 100.64 mesh into 8–24 req/hour.
         rl_key = "__platform_mesh__"
         rl_limit = settings.anonymous_scan_mesh_rate_limit_per_hour
     if not allow_anonymous_scan(rl_key, limit_per_hour=rl_limit):
         raise HTTPException(status_code=429, detail="Too many scans from this IP — try again later")
 
-    url = canonicalize_url(str(body.url))
+    url = ensure_https_url(str(body.url))
     root = registrable_domain(url)
     if not root:
         raise HTTPException(status_code=400, detail="Could not parse domain from URL")
@@ -119,14 +119,17 @@ def create_scan(
     eng_list = available_engines(eng_list)
 
     discovery_params = discovery_params_from_body(body)
-    merged_excluded = list(
-        dict.fromkeys(
-            list(discovery_params.get("excluded_competitors") or [])
-            + [c.strip() for c in body.competitors if c.strip()]
-        )
-    )
-    if merged_excluded:
-        discovery_params["excluded_competitors"] = merged_excluded
+    user_provided: list[dict[str, str]] = []
+    for raw in body.competitors:
+        cu = canonicalize_url(raw if raw.startswith("http") else f"https://{raw}")
+        dom = registrable_domain(cu)
+        if not dom or dom == root:
+            continue
+        user_provided.append({"domain": dom, "name": dom})
+    if user_provided:
+        discovery_params["user_provided_competitors"] = user_provided
+    discovery_params["auto_discover"] = True
+    discovery_params["discovery_status"] = "pending"
 
     scan = Scan(
         tenant_id=tenant.id,
@@ -141,6 +144,8 @@ def create_scan(
     db.commit()
     db.refresh(scan)
 
+    # Defer so the client gets 201 immediately; with task_always_eager (default in dev) the
+    # full fan-out + engine runs still execute in this process after the response is sent.
     background_tasks.add_task(_enqueue_start_scan, str(scan.id))
     return ScanCreateResponse(scan_id=str(scan.id))
 
@@ -195,11 +200,6 @@ def _empty_weekly_from_multi(multi: dict[str, object], weeks: int) -> dict[str, 
     return {"primary_brand_id": primary_id, "weeks": weeks, "entities": entities_meta, "series": []}
 
 
-# NOTE: keep all specific `/{scan_id}/...` routes BEFORE the generic `/{scan_id}` snapshot
-# route below; otherwise FastAPI matches the generic one first and returns a Scan snapshot
-# (or 404 if scan_id was misread) for the SoV paths.
-
-
 @router.get("/{scan_id}/report")
 def get_scan_report(scan_id: UUID, db: DbSession):
     scan = _get_scan(db, scan_id)
@@ -213,7 +213,11 @@ def get_scan_sov_multi_engine(
     response: Response,
     range: str = Query("30d", alias="range"),
 ):
-    """Multi-entity SoV by engine for this scan's brand (public; same access as ``/report``)."""
+    """Multi-entity SoV by engine for this scan's brand (public; same access model as ``/report``).
+
+    Funnel report pages must not call ``GET /brands/.../sov/*`` (Clerk + tenant checks); use this
+    route keyed by ``scan_id`` instead.
+    """
     response.headers["Cache-Control"] = "no-store"
     scan = _get_scan(db, scan_id)
     brand = db.get(Brand, scan.brand_id)
@@ -230,7 +234,7 @@ def get_scan_sov_multi_weekly_trend(
     response: Response,
     weeks: int = Query(12, ge=4, le=52),
 ):
-    """Weekly multi-entity SoV for this scan's brand (public; same access as ``/report``)."""
+    """Weekly multi-entity SoV for this scan's brand (public; same access model as ``/report``)."""
     response.headers["Cache-Control"] = "no-store"
     scan = _get_scan(db, scan_id)
     brand = db.get(Brand, scan.brand_id)
@@ -250,8 +254,7 @@ def get_scan_sov_summary(
     """Return multi-engine + weekly SoV in one response (public; same access as ``/report``).
 
     Funnel report pages use this instead of two parallel fetches so a single failing leg
-    does not surface as a hard error when the other succeeds. Each side is wrapped so a
-    failure on one returns an empty-but-valid payload rather than a 500.
+    does not surface as a hard error when the other succeeds.
     """
     response.headers["Cache-Control"] = "no-store"
     scan = _get_scan(db, scan_id)
@@ -367,10 +370,8 @@ async def stream_scan(scan_id: UUID, db: DbSession):
     )
 
 
-# IMPORTANT: this generic snapshot route must stay at the BOTTOM of this module so
-# that `/{scan_id}/report`, `/{scan_id}/sov/*`, `/{scan_id}/stream`, etc. are all
-# registered first and matched before this wildcard.
 @router.get("/{scan_id}")
 def get_scan(scan_id: UUID, db: DbSession):
+    """Scan snapshot — registered **after** all ``/{scan_id}/…`` routes so ``/sov/…`` paths are not shadowed."""
     scan = _get_scan(db, scan_id)
     return build_scan_snapshot(db, scan)

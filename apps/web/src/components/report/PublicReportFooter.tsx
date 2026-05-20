@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export function PublicReportFooter() {
   return (
     <footer className="border-t border-slate-800 bg-tr-navy text-slate-400">
@@ -8,9 +10,12 @@ export function PublicReportFooter() {
           A Traffic Radius product
         </p>
         <div className="flex flex-wrap items-center gap-5">
-          <span className="hover:text-white">Privacy</span>
-          <span className="hover:text-white">Terms</span>
-          <span className="hover:text-white">Contact</span>
+          <Link href="/privacy" className="hover:text-white">
+            Privacy
+          </Link>
+          <Link href="/terms" className="hover:text-white">
+            Terms
+          </Link>
         </div>
         <div>
           <a href="tel:1300852340" className="font-semibold text-white hover:underline">

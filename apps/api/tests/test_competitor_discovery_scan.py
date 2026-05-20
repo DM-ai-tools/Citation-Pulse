@@ -33,8 +33,8 @@ def test_discovery_not_pending_after_done():
     assert competitor_discovery_pending(scan) is False
 
 
-def test_auto_discover_disabled():
+def test_auto_discover_always_enabled_even_when_stored_false():
     scan = _Scan()
     scan.discovery_params = {"auto_discover": False, "discovery_status": "pending"}
-    assert auto_discover_enabled(scan) is False
+    assert auto_discover_enabled(scan) is True
     assert competitor_discovery_pending(scan) is False

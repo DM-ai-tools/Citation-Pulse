@@ -40,9 +40,8 @@ def test_build_messages_includes_target_and_exclusions():
     assert "https://example.com.au" in user
     assert "gutter replacement" in user
     assert "yellowpages.com.au" in user
-    assert "1. WEBSITE ANALYSIS" in user
-    assert "6. CITATION RANKING" in user
-    assert "exactly 3 objects" in user
+    assert "exactly 5 objects" in user
+    assert "5 same_level_competitors" in user
     assert "validation_summary" in user
 
 
@@ -152,8 +151,8 @@ def test_full_schema_roundtrip():
     parsed = CompetitorDiscoveryResult.model_validate(data)
     _validate_counts(parsed)
     dumped = json.loads(parsed.model_dump_json())
-    assert len(dumped["same_level_competitors"]) == 3
-    assert len(dumped["one_level_above_competitors"]) == 3
+    assert len(dumped["same_level_competitors"]) == SAME_LEVEL_COUNT
+    assert len(dumped["one_level_above_competitors"]) == ONE_LEVEL_ABOVE_COUNT
 
 
 def test_finalize_discovery_assigns_ranks():

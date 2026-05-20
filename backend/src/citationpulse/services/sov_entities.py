@@ -49,6 +49,33 @@ def _bucket_key(domain_field: str, domain_map: dict[str, str]) -> str:
     return "other"
 
 
+def _bucket_citation(ownership: str, domain_field: str, domain_map: dict[str, str]) -> str:
+    """Prefer stored ownership; fall back to domain map (fixes engine SoV when domain text differs)."""
+    own = (ownership or "").strip().lower()
+    if own == "brand":
+        return "brand"
+    if own == "competitor":
+        key = _bucket_key(domain_field, domain_map)
+        if key.startswith("competitor:"):
+            return key
+    mapped = _bucket_key(domain_field, domain_map)
+    if mapped != "other":
+        return mapped
+    return "other"
+
+
+def _week_start_date(wk: datetime | date) -> date:
+    d = wk.date() if isinstance(wk, datetime) else wk
+    return d - timedelta(days=d.weekday())
+
+
+def _rolling_week_starts(weeks: int) -> list[date]:
+    """ISO week starts (Monday), oldest → newest, always ``weeks`` long."""
+    today = datetime.now(timezone.utc).date()
+    current_monday = today - timedelta(days=today.weekday())
+    return [current_monday - timedelta(weeks=weeks - 1 - i) for i in range(weeks)]
+
+
 def _canonical_engine_key(raw: object) -> str | None:
     """Map ORM / driver engine values to ``EngineType.value`` (e.g. ``chatgpt``).
 
@@ -92,7 +119,7 @@ def multientity_sov_by_engine(
     since = _since(days)
 
     stmt = (
-        select(EngineRun.engine, Citation.domain, func.count(Citation.id))
+        select(EngineRun.engine, Citation.ownership, Citation.domain, func.count(Citation.id))
         .select_from(Citation)
         .join(EngineRun, Citation.engine_run_id == EngineRun.id)
         .join(Prompt, EngineRun.prompt_id == Prompt.id)
@@ -100,16 +127,16 @@ def multientity_sov_by_engine(
         .where(Brand.tenant_id == tenant_id, Brand.id == primary_brand_id)
         .where(EngineRun.finished_at.is_not(None))
         .where(EngineRun.finished_at >= since)
-        .group_by(EngineRun.engine, Citation.domain)
+        .group_by(EngineRun.engine, Citation.ownership, Citation.domain)
     )
 
     # counts[engine][bucket] = n
     counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for eng, dom, cnt in db.execute(stmt):
+    for eng, ownership, dom, cnt in db.execute(stmt):
         eng_key = _canonical_engine_key(eng)
         if eng_key is None:
             continue
-        key = _bucket_key(str(dom), domain_map)
+        key = _bucket_citation(str(ownership or ""), str(dom), domain_map)
         counts[eng_key][key] += int(cnt)
 
     engines = all_engines()
@@ -123,12 +150,15 @@ def multientity_sov_by_engine(
 
     for eng in engines:
         per_b = counts.get(eng, {})
-        total = sum(per_b.values()) or 1
-        # brand
-        entity_rows[0]["shares_by_engine"][eng] = round(per_b.get("brand", 0) / total, 4)
+        # Share among brand + linked competitors only (exclude third-party / neutral).
+        tracked_total = (
+            int(per_b.get("brand", 0))
+            + sum(int(per_b.get(f"competitor:{cid}", 0)) for cid in competitors)
+        ) or 1
+        entity_rows[0]["shares_by_engine"][eng] = round(per_b.get("brand", 0) / tracked_total, 4)
         for i, (cid, _) in enumerate(competitors.items(), start=1):
             bkey = f"competitor:{cid}"
-            entity_rows[i]["shares_by_engine"][eng] = round(per_b.get(bkey, 0) / total, 4)
+            entity_rows[i]["shares_by_engine"][eng] = round(per_b.get(bkey, 0) / tracked_total, 4)
         # optional: expose "other" share on primary row? skip for now
 
     brand_citations = sum(int(counts.get(eng, {}).get("brand", 0)) for eng in engines)
@@ -245,7 +275,7 @@ def multi_entity_weekly_share_trend(
 
     wk_col = func.date_trunc("week", EngineRun.finished_at)
     stmt = (
-        select(wk_col, Citation.domain, func.count(Citation.id))
+        select(wk_col, Citation.ownership, Citation.domain, func.count(Citation.id))
         .select_from(Citation)
         .join(EngineRun, Citation.engine_run_id == EngineRun.id)
         .join(Prompt, EngineRun.prompt_id == Prompt.id)
@@ -253,20 +283,18 @@ def multi_entity_weekly_share_trend(
         .where(Brand.tenant_id == tenant_id, Brand.id == primary_brand_id)
         .where(EngineRun.finished_at.is_not(None))
         .where(EngineRun.finished_at >= since)
-        .group_by(wk_col, Citation.domain)
+        .group_by(wk_col, Citation.ownership, Citation.domain)
         .order_by(wk_col)
     )
 
-    per_week_bucket: dict[datetime, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for wk, dom, cnt in db.execute(stmt):
+    per_week_bucket: dict[date, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for wk, ownership, dom, cnt in db.execute(stmt):
         if wk is None:
             continue
-        key = _bucket_key(str(dom), domain_map)
-        per_week_bucket[wk][key] += int(cnt)
+        key = _bucket_citation(str(ownership or ""), str(dom), domain_map)
+        per_week_bucket[_week_start_date(wk)][key] += int(cnt)
 
-    ordered_weeks = sorted(per_week_bucket.keys())
-    if len(ordered_weeks) > weeks:
-        ordered_weeks = ordered_weeks[-weeks:]
+    ordered_weeks = _rolling_week_starts(weeks)
 
     entities_meta: list[dict[str, str]] = [
         {"entity_id": str(primary.id), "name": primary.name, "role": "brand"},
@@ -275,8 +303,8 @@ def multi_entity_weekly_share_trend(
         entities_meta.append({"entity_id": str(cid), "name": comp.name, "role": "competitor"})
 
     series_out: list[dict[str, object]] = []
-    for wk in ordered_weeks:
-        buckets = dict(per_week_bucket[wk])
+    for wk_date in ordered_weeks:
+        buckets = dict(per_week_bucket.get(wk_date, {}))
         brand_n = int(buckets.get("brand", 0))
         comp_ns = {cid: int(buckets.get(f"competitor:{cid}", 0)) for cid in competitors}
         tracked = brand_n + sum(comp_ns.values())
@@ -289,13 +317,13 @@ def multi_entity_weekly_share_trend(
             shares[str(primary.id)] = 0.0
             for cid in competitors:
                 shares[str(cid)] = 0.0
-        if isinstance(wk, datetime):
-            week_label = wk.date().isoformat()
-        elif isinstance(wk, date):
-            week_label = wk.isoformat()
-        else:
-            week_label = str(wk)
-        series_out.append({"week_start": week_label, "shares": shares, "tracked_citations": tracked})
+        series_out.append(
+            {
+                "week_start": wk_date.isoformat(),
+                "shares": shares,
+                "tracked_citations": tracked,
+            }
+        )
 
     return {
         "primary_brand_id": str(primary_brand_id),

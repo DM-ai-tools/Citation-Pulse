@@ -1,20 +1,58 @@
 import { z } from "zod";
 
-const domainLike = z
+/** Bare domain or full URL → canonical https URL for the API. */
+export function normalizeWebsiteInput(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new Error("Website is required");
+  }
+  let candidate = trimmed;
+  if (!/^https?:\/\//i.test(candidate)) {
+    candidate = `https://${candidate.replace(/^\/+/, "")}`;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error("Enter a valid website or domain (e.g. hipages.com.au)");
+  }
+  const host = parsed.hostname;
+  if (!host || !host.includes(".")) {
+    throw new Error("Enter a valid website or domain (e.g. hipages.com.au)");
+  }
+  const path =
+    parsed.pathname && parsed.pathname !== "/"
+      ? parsed.pathname.replace(/\/+$/, "") || "/"
+      : "/";
+  const search = parsed.search || "";
+  return `https://${host}${path === "/" && !search ? "/" : path}${search}`;
+}
+
+const websiteField = z
   .string()
   .trim()
-  .min(1)
-  .max(253)
-  .regex(/^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$|^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$/);
+  .min(1, "Website is required")
+  .transform((s) => normalizeWebsiteInput(s));
 
 export const scanFormSchema = z.object({
-  url: z
-    .string()
-    .trim()
-    .min(1, "URL is required")
-    .transform((s) => (s.startsWith("http") ? s : `https://${s}`))
-    .pipe(z.string().url("Enter a valid URL")),
-  competitors: z.array(z.string().trim()).max(5).default([]),
+  url: websiteField,
+  competitors: z
+    .array(z.string().trim().min(1))
+    .max(5)
+    .default([])
+    .transform((rows) =>
+      rows
+        .map((line) => {
+          const t = line.trim();
+          if (!t) return "";
+          try {
+            return normalizeWebsiteInput(t);
+          } catch {
+            return "";
+          }
+        })
+        .filter(Boolean),
+    ),
   prompts: z
     .array(z.string().trim().min(1))
     .min(1, "Add at least one prompt")
@@ -28,7 +66,11 @@ export type ScanFormValues = z.infer<typeof scanFormSchema>;
 export function parseCompetitorLine(line: string): string {
   const t = line.trim();
   if (!t) return "";
-  return t.startsWith("http") ? t : `https://${t}`;
+  try {
+    return normalizeWebsiteInput(t);
+  } catch {
+    return t.startsWith("http") ? t : `https://${t}`;
+  }
 }
 
 /** Split comma- or newline-separated competitor domains (max 5). */
@@ -39,5 +81,3 @@ export function parseCompetitorsField(raw: string): string[] {
     .filter(Boolean);
   return parts.slice(0, 5);
 }
-
-export const competitorSchema = z.union([z.string().url(), domainLike]);

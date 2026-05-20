@@ -7,6 +7,16 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import tldextract
 
 
+def ensure_https_url(raw: str) -> str:
+    """Accept a full URL or a bare domain (``hipages.com.au``) and return a canonical https URL."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    if not s.startswith(("http://", "https://")):
+        s = "https://" + s.lstrip("/")
+    return canonicalize_url(s)
+
+
 def canonicalize_url(url: str) -> str:
     """Strip UTM-like params, normalize host/path (TDD §6.3)."""
     parsed = urlparse(url.strip())

@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     internal_phase1: bool = True
     internal_api_key: str = ""
 
+    # Native email/password auth (Citation Pulse accounts)
+    auth_jwt_secret: str = "change-me-set-AUTH_JWT_SECRET-in-production"
+    auth_jwt_expire_hours: int = 72
+    auth_admin_name: str = "Administrator"
+    auth_admin_email: str = ""
+    auth_admin_password: str = ""
+
     api_cors_origins: str = "http://localhost:3000"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
@@ -68,6 +75,8 @@ class Settings(BaseSettings):
     stripe_price_dfy: str = ""  # $1200/mo price id
 
     # Hybrid routing: ChatGPT/Claude use direct keys when set; Gemini/Perplexity use OpenRouter.
+    # Set CLAUDE_PREFER_OPENROUTER=true to skip Anthropic direct (e.g. when direct credits are exhausted).
+    claude_prefer_openrouter: bool = False
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Optional OpenRouter analytics headers — appear on the public leaderboard
@@ -124,9 +133,9 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_max_tokens: int = 1024
 
-    # Competitor discovery (POST /api/v1/competitors/analyze) — large JSON payload.
-    competitor_discovery_model: str = "openai/gpt-4o-mini:online"
-    competitor_discovery_max_tokens: int = 12288
+    # Competitor discovery (POST /api/v1/competitors/analyze) — web-grounded JSON via OpenRouter.
+    competitor_discovery_model: str = "perplexity/sonar"
+    competitor_discovery_max_tokens: int = 8192
     competitor_analyze_rate_limit_per_hour: int = 12
     competitor_analyze_mesh_rate_limit_per_hour: int = 120
 
@@ -174,6 +183,45 @@ class Settings(BaseSettings):
         if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
             s = s[1:-1].strip()
         return s
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalise_database_url(cls, v: object) -> str:
+        """Railway Postgres often provides ``postgresql://``; SQLAlchemy needs the psycopg driver."""
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if s.startswith("postgres://"):
+            s = "postgresql+psycopg://" + s[len("postgres://") :]
+        elif s.startswith("postgresql://") and "+psycopg" not in s.split("://", 1)[0]:
+            s = "postgresql+psycopg://" + s[len("postgresql://") :]
+        return s
+
+
+_WEAK_JWT_SECRETS = frozenset(
+    {
+        "",
+        "change-me-set-AUTH_JWT_SECRET-in-production",
+        "change-me-use-openssl-rand-hex-32",
+    }
+)
+
+
+def validate_production_settings(s: Settings | None = None) -> None:
+    """Fail fast when production is misconfigured (Railway deploy safety)."""
+    s = s or get_settings()
+    if s.environment.lower() != "production":
+        return
+    secret = (s.auth_jwt_secret or "").strip()
+    if secret in _WEAK_JWT_SECRETS or len(secret) < 32:
+        raise RuntimeError(
+            "AUTH_JWT_SECRET must be set to a strong random value (32+ chars) when ENVIRONMENT=production"
+        )
+    if s.internal_phase1 and not (s.clerk_jwks_url or "").strip():
+        _log = __import__("logging").getLogger(__name__)
+        _log.warning(
+            "INTERNAL_PHASE1=true in production without Clerk — ensure native auth is intended."
+        )
 
 
 @lru_cache

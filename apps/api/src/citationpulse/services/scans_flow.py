@@ -16,7 +16,6 @@ from citationpulse.models.domain import (
     EngineType,
     Ownership,
     Prompt,
-    PromptMetrics,
     RunStatus,
     Scan,
     Tenant,
@@ -150,6 +149,15 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
         scan.completed_at = datetime.now(timezone.utc)
     scan.score_overall = new_score
     db.commit()
+    if was_new:
+        try:
+            from citationpulse.services.competitor_pipeline import (
+                enrich_competitor_discovery_after_scan_complete,
+            )
+
+            enrich_competitor_discovery_after_scan_complete(db, scan_id)
+        except Exception:
+            _log.exception("competitor pipeline after scan completion failed scan_id=%s", scan_id)
     if was_new or prev_score != new_score:
         publish_scan_event(
             str(scan.id),
@@ -433,15 +441,9 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
         )
 
         rows = list_opportunities_for_brand(db, brand.id, status="open")
-        brand_prompts = list(
-            db.scalars(select(Prompt).where(Prompt.brand_id == brand.id, Prompt.enabled.is_(True))).all()
-        )
-        lacks_prompt_metrics = any(
-            (m := db.get(PromptMetrics, p.id)) is None or m.est_volume is None for p in brand_prompts
-        )
-        missing_opp_volume = bool(rows) and any(o.est_volume is None for o in rows)
-        should_refresh = scan.status == "completed" and dataforseo_configured() and (
-            not rows or lacks_prompt_metrics or missing_opp_volume
+        missing_volume = bool(rows) and any(o.est_volume is None for o in rows)
+        should_refresh = scan.status == "completed" and (
+            not rows or (missing_volume and dataforseo_configured())
         )
         if should_refresh:
             try:
@@ -485,6 +487,30 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
     )
 
     competitor_discovery = competitor_discovery_for_report(scan) if scan.status == "completed" else None
+    if scan.status == "completed" and isinstance(competitor_discovery, dict) and competitor_discovery:
+        params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+        from citationpulse.services.competitor_discovery_scan import auto_discover_enabled
+
+        if auto_discover_enabled(scan):
+            try:
+                from citationpulse.services.competitor_pipeline import enrich_competitor_discovery_for_scan
+
+                cells_pre = list((snap.get("matrix") or {}).get("cells") or [])
+                engines_pre = list(snap.get("engines") or [])
+                prompts_pre = list(snap.get("prompts") or [])
+                enriched = enrich_competitor_discovery_for_scan(
+                    db,
+                    scan,
+                    cells=cells_pre,
+                    engines=engines_pre,
+                    prompts=prompts_pre,
+                )
+                if enriched:
+                    competitor_discovery = enriched
+                db.commit()
+            except Exception:
+                _log.exception("enrich_competitor_discovery during build_scan_report scan_id=%s", scan.id)
+                db.rollback()
 
     user_provided_competitors: list[dict[str, object]] = []
     params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
@@ -495,7 +521,7 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
                     "domain": str(row["domain"]),
                     "name": str(row.get("name") or row["domain"]),
                     "level": "user_provided",
-                    "tier": "You provided",
+                    "tier": "4",
                     "source": "user",
                 }
             )
@@ -511,7 +537,7 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
                         "domain": dom,
                         "name": str(c.get("name") or dom),
                         "level": "user_provided",
-                        "tier": "You provided",
+                        "tier": "4",
                         "source": "user",
                     }
                 )

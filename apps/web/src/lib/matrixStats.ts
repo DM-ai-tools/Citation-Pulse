@@ -1,5 +1,16 @@
 import type { MatrixCell } from "@/types/scan";
 
+/** Per prompt × engine score (0–100), aligned with engine layer weighting. */
+export function matrixCellScore(c: MatrixCell | undefined): number {
+  if (!c) return 0;
+  const st = c.status;
+  if (st === "cited") return c.position === 1 ? 100 : 75;
+  if (st === "comp") return 55;
+  if (st === "none" || st === "error") return 0;
+  if (st === "running") return 30;
+  return 10;
+}
+
 export function promptCompletionPct(
   prompts: { id: string }[],
   engines: string[],

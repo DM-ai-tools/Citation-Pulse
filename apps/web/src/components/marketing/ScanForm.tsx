@@ -199,7 +199,7 @@ export function ScanForm({ className }: { className?: string }) {
       setPromptInput("");
 
       const parsed = scanFormSchema.safeParse({
-        url,
+        url: url.trim(),
         competitors: compList,
         prompts: mergedPrompts,
         locale,
@@ -250,7 +250,8 @@ export function ScanForm({ className }: { className?: string }) {
         <div>
           <h3 className="font-display text-lg font-bold text-tr-navy">Run your first citation scan</h3>
           <p className="mt-1 text-[13px] text-tr-mute">
-            Paste your website, add competitors if you want, and enter the questions your buyers ask AI.
+            Enter your website domain or full URL, add competitors if you want, and enter the questions your
+            buyers ask AI.
           </p>
         </div>
 
@@ -262,14 +263,19 @@ export function ScanForm({ className }: { className?: string }) {
               </span>
             </label>
             <input
-              type="url"
+              type="text"
+              inputMode="url"
               className={cn(fieldClass, "mt-1.5")}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://acme.com"
+              placeholder="hipages.com.au or https://www.example.com"
               required
               autoComplete="url"
+              spellCheck={false}
             />
+            <p className="mt-1 text-[11px] text-tr-mute">
+              Domain only is fine — we add <span className="font-mono">https://</span> automatically.
+            </p>
           </div>
 
           <div>

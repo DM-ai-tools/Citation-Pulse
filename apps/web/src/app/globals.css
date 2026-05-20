@@ -75,6 +75,23 @@ body {
     box-shadow: 0 4px 18px rgba(31, 179, 107, 0.35);
   }
 
+  .auth-grid-bg {
+    background-color: #eef1f4;
+    background-image:
+      linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .auth-submit-btn {
+    background: #94d148;
+    box-shadow: 0 2px 8px rgba(148, 209, 72, 0.35);
+  }
+
+  .auth-submit-btn:hover:not(:disabled) {
+    background: #85c23f;
+  }
+
   .scan-under-mark {
     @apply relative mb-4 inline-block h-1 w-20 rounded-sm;
     background: linear-gradient(90deg, #1fb36b 0%, #32d882 100%);

@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from citationpulse.api.v1.billing import router as billing_router
@@ -70,14 +71,6 @@ else:
     cors_origin_regex = f"{railway_origin_regex}|{loopback_regex}|{rfc1918_http_regex}"
 
 app = FastAPI(title="CitationPulse API", version="0.1.0", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins or ["*"],
-    allow_origin_regex=cors_origin_regex,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.middleware("http")
@@ -87,6 +80,23 @@ async def security_headers(request, call_next):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return resp
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins if origins else ["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origin_regex=cors_origin_regex,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
+    _log.exception("Unhandled error %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/")

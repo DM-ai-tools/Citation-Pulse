@@ -191,7 +191,7 @@ export function CompetitorDiscovery({
         <h3 className="font-display text-sm font-extrabold uppercase tracking-wide text-tr-navy">
           AI competitor landscape
         </h3>
-        <p className="text-xs text-tr-mute">tiered · up to 8 same level + 8 one above</p>
+        <p className="text-xs text-tr-mute">tiered · same level + one above</p>
       </div>
 
       {!data ? (
@@ -227,7 +227,7 @@ export function CompetitorDiscovery({
               <p className="mt-1 text-[12px] text-tr-mute">
                 AI-discovered peers and companies you listed — scroll to see all.
               </p>
-              <div className="mt-3 max-h-[480px] overflow-y-auto overflow-x-hidden pr-1 scroll-smooth">
+              <div className="mt-3 max-h-[320px] overflow-y-auto overflow-x-hidden pr-1 scroll-smooth">
                 <CompetitorRoster
                   analysis={analysisCompetitors}
                   userProvided={userProvided}

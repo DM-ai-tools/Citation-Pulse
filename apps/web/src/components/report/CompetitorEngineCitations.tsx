@@ -3,23 +3,24 @@
 import { useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 import { Spinner } from "@/components/primitives";
-import { engineTitle } from "@/lib/engineDisplay";
-import { cn } from "@/lib/utils";
-import type { CompetitorCitationVisibility, EngineCitationHit, RankedCompetitorVisibility } from "@/types/competitorVisibility";
 
 function truncatePrompt(text: string, max = 52): string {
   const t = text.trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max - 1)}…`;
 }
+import { engineTitle } from "@/lib/engineDisplay";
+import { cn } from "@/lib/utils";
+import type { CompetitorCitationVisibility, EngineCitationHit, RankedCompetitorVisibility } from "@/types/competitorVisibility";
 
 function domainHref(domain: string) {
   const d = domain.replace(/^https?:\/\//i, "").split("/")[0] ?? domain;
   return `https://${d}`;
 }
 
-function tierBadge(tier: string) {
+function tierBadge(tier: string): string | null {
   const t = tier.trim();
+  if (!t || /^you provided$/i.test(t)) return null;
   return /^tier\s/i.test(t) ? t : `Tier ${t}`;
 }
 
@@ -30,6 +31,48 @@ function urlLabel(url: string) {
   } catch {
     return url.slice(0, 56);
   }
+}
+
+const TARGET_SAME_MIN = 2;
+const TARGET_ABOVE_MIN = 2;
+const TARGET_SAME_MAX = 3;
+const TARGET_ABOVE_MAX = 3;
+const DISPLAY_MIN_COMPETITORS = TARGET_SAME_MIN + TARGET_ABOVE_MIN;
+const DISPLAY_MAX_COMPETITORS = TARGET_SAME_MAX + TARGET_ABOVE_MAX;
+
+function citedEnginesForRow(row: RankedCompetitorVisibility): string[] {
+  const byEngine = row.citations_by_engine ?? {};
+  const candidates = row.cited_engines?.length
+    ? row.cited_engines
+    : row.engines?.length
+      ? row.engines
+      : Object.keys(byEngine);
+  return candidates.filter((eng) => (byEngine[eng]?.length ?? 0) > 0);
+}
+
+function isDisplayableCompetitor(row: RankedCompetitorVisibility): boolean {
+  if (!row.cited_by_engines) return false;
+  if (citedEnginesForRow(row).length > 0) return true;
+  const hits = row.engine_citations?.length ?? 0;
+  return hits > 0;
+}
+
+function mergeCitedCompetitors(viewData: CompetitorCitationVisibility | null): RankedCompetitorVisibility[] {
+  if (!viewData) return [];
+  const byDomain = new Map<string, RankedCompetitorVisibility>();
+  const add = (rows: RankedCompetitorVisibility[] | undefined) => {
+    for (const r of rows ?? []) {
+      if (!isDisplayableCompetitor(r)) continue;
+      const prev = byDomain.get(r.domain);
+      if (!prev || (r.visibility_rank ?? 99) < (prev.visibility_rank ?? 99)) {
+        byDomain.set(r.domain, r);
+      }
+    }
+  };
+  add(viewData.competitors ?? viewData.ranked_competitors);
+  add(viewData.all_ranked_competitors);
+  add(viewData.other_cited_domains);
+  return [...byDomain.values()].sort((a, b) => (a.visibility_rank ?? 99) - (b.visibility_rank ?? 99));
 }
 
 function EngineColumn({ engine, citations }: { engine: string; citations: EngineCitationHit[] }) {
@@ -64,35 +107,12 @@ function EngineColumn({ engine, citations }: { engine: string; citations: Engine
   );
 }
 
-/** Engines where this competitor has at least one citation hit (omit uncited engines). */
-function citedEnginesForRow(row: RankedCompetitorVisibility): string[] {
+function CompetitorRow({ row }: { row: RankedCompetitorVisibility }) {
   const byEngine = row.citations_by_engine ?? {};
-  const fromMap = Object.entries(byEngine)
-    .filter(([, hits]) => Array.isArray(hits) && hits.length > 0)
-    .map(([eng]) => eng);
-  if (fromMap.length > 0) return fromMap.sort();
-  if (row.engines?.length) return [...row.engines];
-  return [];
-}
-
-function competitorHasEngineCitations(row: RankedCompetitorVisibility): boolean {
-  if (row.cited_by_engines) return true;
-  if ((row.engine_count ?? 0) > 0) return true;
-  if ((row.citation_count ?? 0) > 0) return true;
-  return citedEnginesForRow(row).length > 0;
-}
-
-function CompetitorRow({
-  row,
-  scanEngineCount,
-}: {
-  row: RankedCompetitorVisibility;
-  scanEngineCount: number;
-}) {
-  const byEngine = row.citations_by_engine ?? {};
-  const visibleEngines = citedEnginesForRow(row);
-  if (visibleEngines.length === 0) return null;
+  const citedEngines = citedEnginesForRow(row);
+  if (citedEngines.length === 0) return null;
   const host = row.domain.replace(/^www\./i, "");
+  const tier = tierBadge(row.tier);
 
   return (
     <article className="overflow-hidden rounded-xl border border-tr-line bg-[#FCFFFD]">
@@ -109,36 +129,37 @@ function CompetitorRow({
           >
             {host}
           </a>
-          {row.user_provided ? (
-            <span className="ml-2 text-[11px] font-semibold uppercase text-tr-teal">You provided</span>
-          ) : row.level ? (
+          {row.level && row.level !== "user_provided" ? (
             <span className="ml-2 text-[11px] uppercase text-tr-mute">
               {row.level === "one_level_above" ? "One tier above" : "Same level"}
             </span>
           ) : null}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {row.user_provided ? (
-            <span className="rounded-full border border-tr-teal/40 bg-tr-pale px-2.5 py-0.5 font-display text-[10px] font-extrabold uppercase text-tr-teal">
-              Your competitor
+          {tier ? (
+            <span className="rounded-full bg-tr-pale px-2.5 py-0.5 font-display text-[10px] font-extrabold uppercase text-tr-teal">
+              {tier}
             </span>
           ) : null}
-          <span className="rounded-full bg-tr-pale px-2.5 py-0.5 font-display text-[10px] font-extrabold uppercase text-tr-teal">
-            {tierBadge(row.tier)}
-          </span>
           <span className="rounded-full bg-brand-primary/10 px-2.5 py-0.5 font-display text-[11px] font-extrabold text-brand-primary">
-            {row.visibility_score}% · {row.engine_count}/{scanEngineCount} engines
+            {row.visibility_score}% · cited in {citedEngines.length} engine
+            {citedEngines.length === 1 ? "" : "s"}
           </span>
         </div>
       </header>
 
-      <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-        {visibleEngines.map((eng) => (
-          <EngineColumn
-            key={eng}
-            engine={eng}
-            citations={(byEngine[eng] as EngineCitationHit[] | undefined) ?? []}
-          />
+      <div
+        className={cn(
+          "grid gap-3 p-4",
+          citedEngines.length <= 2
+            ? "sm:grid-cols-2"
+            : citedEngines.length === 3
+              ? "sm:grid-cols-2 lg:grid-cols-3"
+              : "sm:grid-cols-2 lg:grid-cols-4",
+        )}
+      >
+        {citedEngines.map((eng) => (
+          <EngineColumn key={eng} engine={eng} citations={byEngine[eng] ?? []} />
         ))}
       </div>
     </article>
@@ -162,6 +183,7 @@ export function CompetitorEngineCitations({
   onPromptSelect,
   discoveryPending,
   discoveryFailed,
+  discoveryValidatedCount,
   className,
 }: {
   data: CompetitorCitationVisibility | null | undefined;
@@ -170,6 +192,8 @@ export function CompetitorEngineCitations({
   onPromptSelect?: (promptId: string) => void;
   discoveryPending?: boolean;
   discoveryFailed?: boolean;
+  /** Same-level + one-tier-above count from discovery validation (for empty-state copy). */
+  discoveryValidatedCount?: number;
   className?: string;
 }) {
   const showPromptToggle = prompts.length > 1 && Boolean(onPromptSelect);
@@ -180,18 +204,25 @@ export function CompetitorEngineCitations({
     return resolveVisibilityForPrompt(data, activePromptId);
   }, [data, activePromptId]);
 
-  const engines = viewData?.engines ?? data?.engines ?? ["chatgpt", "claude", "gemini", "perplexity"];
-  const competitors = useMemo(() => {
-    const rows = viewData?.competitors ?? viewData?.ranked_competitors ?? [];
-    return [...rows]
-      .filter(competitorHasEngineCitations)
-      .sort((a, b) => {
-        const au = a.user_provided ? 0 : 1;
-        const bu = b.user_provided ? 0 : 1;
-        if (au !== bu) return au - bu;
-        return (a.visibility_rank ?? 99) - (b.visibility_rank ?? 99);
-      });
-  }, [viewData]);
+  const competitors = useMemo(() => mergeCitedCompetitors(viewData), [viewData]);
+
+  const sameTier = useMemo(
+    () => competitors.filter((r) => r.level === "same_level"),
+    [competitors],
+  );
+  const aboveTier = useMemo(
+    () => competitors.filter((r) => r.level === "one_level_above"),
+    [competitors],
+  );
+  const otherCited = useMemo(
+    () =>
+      competitors.filter(
+        (r) => r.level !== "same_level" && r.level !== "one_level_above",
+      ),
+    [competitors],
+  );
+
+  const tierBalance = viewData?.tier_balance;
 
   const activePromptText =
     prompts.find((p) => p.id === activePromptId)?.text ?? viewData?.prompt_text ?? data?.prompt_text;
@@ -208,8 +239,9 @@ export function CompetitorEngineCitations({
           Competitor citations by AI engine
         </h3>
         <p className="mt-1 text-[12px] leading-relaxed text-tr-mute">
-          AI-discovered competitors plus any companies you listed at scan setup — what ChatGPT, Claude, Gemini,
-          and Perplexity cited for
+          Shows cited competitors only (target {TARGET_SAME_MIN}–{TARGET_SAME_MAX} same-tier and{" "}
+          {TARGET_ABOVE_MIN}–{TARGET_ABOVE_MAX} one-tier-above). Discovery expands until tier minimums are met.
+          Only engines that actually cited each company are shown. Ranked by citation frequency for
           {activePromptText ? (
             <>
               {" "}
@@ -220,23 +252,6 @@ export function CompetitorEngineCitations({
           )}
           . Unrelated URLs are not shown.
         </p>
-        {(viewData?.user_provided_competitors?.length ?? 0) > 0 ? (
-          <div className="mt-3 rounded-lg border border-tr-teal/30 bg-tr-pale/40 px-3 py-2.5">
-            <p className="font-display text-[10px] font-extrabold uppercase tracking-[1px] text-tr-teal">
-              You provided
-            </p>
-            <p className="mt-1 flex flex-wrap gap-2">
-              {viewData!.user_provided_competitors!.map((c) => (
-                <span
-                  key={c.domain}
-                  className="inline-flex items-center rounded-md border border-tr-line bg-white px-2 py-1 text-[12px] font-semibold text-tr-navy"
-                >
-                  {c.name}
-                </span>
-              ))}
-            </p>
-          </div>
-        ) : null}
         {showPromptToggle ? (
           <div className="mt-4" role="tablist" aria-label="Select prompt for competitor citations">
             <p className="mb-2 font-display text-[10px] font-extrabold uppercase tracking-[1.1px] text-tr-teal">
@@ -280,14 +295,69 @@ export function CompetitorEngineCitations({
           confirm <code className="text-[12px]">OPENROUTER_API_KEY</code> has credits, then run a new scan.
         </p>
       ) : !data || competitors.length === 0 ? (
-        <p className="px-[22px] py-10 text-center text-[13px] text-tr-mute">
-          Citations appear after competitor landscape completes. Run a new scan with auto-discover on.
-        </p>
+        <div className="space-y-2 px-[22px] py-10 text-center text-[13px] leading-relaxed text-tr-mute">
+          <p>
+            No competitors were cited by ChatGPT, Claude, Gemini, or Perplexity for this prompt yet.
+            {discoveryValidatedCount && discoveryValidatedCount > 0 ? (
+              <>
+                {" "}
+                Discovery found {discoveryValidatedCount} validated competitor
+                {discoveryValidatedCount === 1 ? "" : "s"} (see Competitor landscape above), but they did not
+                appear in AI answers for this wording — try a new scan after expansion completes or adjust the
+                prompt.
+              </>
+            ) : (
+              " Run a new scan with auto-discover on."
+            )}
+          </p>
+        </div>
       ) : (
         <div className="space-y-4 px-[22px] py-5">
-          {competitors.map((row) => (
-            <CompetitorRow key={row.domain} row={row} scanEngineCount={engines.length} />
-          ))}
+          {tierBalance && !tierBalance.tier_targets_met ? (
+            <p className="rounded-lg border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-[12px] leading-relaxed text-amber-950">
+              Tier balance: {tierBalance.same_tier_cited} same-tier and {tierBalance.one_above_tier_cited}{" "}
+              one-tier-above cited (target at least {TARGET_SAME_MIN} + {TARGET_ABOVE_MIN}). Missing:{" "}
+              {tierBalance.missing_tiers.length
+                ? tierBalance.missing_tiers.map((t) => t.replace(/_/g, " ")).join(", ")
+                : "none"}
+              .
+            </p>
+          ) : competitors.length < DISPLAY_MIN_COMPETITORS ? (
+            <p className="rounded-lg border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-[12px] leading-relaxed text-amber-950">
+              Only {competitors.length} cited competitor{competitors.length === 1 ? "" : "s"} for this prompt
+              (target {DISPLAY_MIN_COMPETITORS}–{DISPLAY_MAX_COMPETITORS} balanced across tiers).
+            </p>
+          ) : null}
+          {sameTier.length > 0 ? (
+            <div className="space-y-3">
+              <h4 className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-teal">
+                Same tier ({sameTier.length})
+              </h4>
+              {sameTier.map((row) => (
+                <CompetitorRow key={row.domain} row={row} />
+              ))}
+            </div>
+          ) : null}
+          {aboveTier.length > 0 ? (
+            <div className="space-y-3">
+              <h4 className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-teal">
+                One tier above ({aboveTier.length})
+              </h4>
+              {aboveTier.map((row) => (
+                <CompetitorRow key={row.domain} row={row} />
+              ))}
+            </div>
+          ) : null}
+          {otherCited.length > 0 ? (
+            <div className="space-y-3">
+              <h4 className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-mute">
+                Other cited
+              </h4>
+              {otherCited.map((row) => (
+                <CompetitorRow key={row.domain} row={row} />
+              ))}
+            </div>
+          ) : null}
         </div>
       )}
     </section>

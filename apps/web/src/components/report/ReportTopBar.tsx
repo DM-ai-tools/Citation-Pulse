@@ -51,7 +51,7 @@ export function ReportTopBar({
               const subject = encodeURIComponent(`CitationPulse report: ${urlHost}`);
               window.location.href = `mailto:sales@trafficradius.com.au?subject=${subject}`;
             }}
-            className="landing-gradient-cta inline-flex items-center gap-1.5 rounded-lg border border-transparent px-3.5 py-2 font-display text-[12.5px] font-bold text-white transition"
+            className="inline-flex items-center gap-1.5 rounded-lg border-[1.5px] border-tr-line bg-white px-3.5 py-2 font-display text-[12.5px] font-bold text-tr-navy transition hover:border-brand-primary hover:text-brand-primary"
           >
             <Mail className="h-4 w-4" /> Email
           </button>

@@ -24,7 +24,6 @@ function heatPillClass(grade: string) {
   return "bg-cyan-100 text-cyan-900 ring-1 ring-cyan-200/80";
 }
 
-/** `prompt_metrics.est_volume` — show compact label when API provides it. */
 function formatMonthlySearches(v: number | null | undefined): string {
   if (v == null || typeof v !== "number" || !Number.isFinite(v) || v <= 0) return "—";
   if (v >= 1_000_000) {
@@ -40,66 +39,35 @@ function formatMonthlySearches(v: number | null | undefined): string {
   return String(Math.round(v));
 }
 
+const GRADE_LEGEND = [
+  { swatch: "bg-rose-400", label: "HOT · A — fix first" },
+  { swatch: "bg-amber-400", label: "WARM · B — plan next" },
+  { swatch: "bg-cyan-400", label: "COOL · C — track later" },
+] as const;
+
 function OpportunitiesLegendFootnote() {
   return (
-    <div className="border-t border-tr-line bg-tr-pale/35 px-[22px] py-4">
-      <p className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-navy">
-        How to read grades
-      </p>
-      <p className="mt-2 text-[12px] leading-relaxed text-tr-mute">
-        The <span className="font-semibold text-tr-navy">pill</span> on each row matches the tier. The{" "}
-        <span className="font-semibold text-tr-navy">letter</span> in the square (A, B, or C) is the same priority level
-        in short form. The model ranks from estimated monthly searches, how open the gap is across engines, competitor
-        citations there, and how long the gap has persisted without closing.
-      </p>
-      <ul className="mt-3 list-none space-y-2.5 pl-0 text-[12px] leading-relaxed text-tr-mute">
-        <li className="flex items-start gap-2.5 sm:gap-3">
-          <span
-            className={cn(
-              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
-              heatPillClass("A"),
-            )}
-          >
-            HOT · A
+    <div className="border-t border-tr-line bg-tr-pale/35 px-[22px] py-3">
+      <div
+        className="flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[10px] border border-tr-line bg-white px-4 py-3 text-[11.5px] text-tr-body"
+        role="list"
+        aria-label="How to read grades"
+      >
+        <span className="font-display text-[10px] font-extrabold uppercase tracking-wide text-tr-navy">
+          How to read grades
+        </span>
+        {GRADE_LEGEND.map((item) => (
+          <span key={item.label} className="inline-flex items-center gap-1.5" role="listitem">
+            <span className={cn("h-3.5 w-3.5 shrink-0 rounded", item.swatch)} aria-hidden />
+            {item.label}
           </span>
-          <span>
-            Highest urgency: strong search upside and/or a sharp gap (for example absent on several engines or heavy
-            competitor presence). Treat these prompts first in content and AI-visibility work.
-          </span>
-        </li>
-        <li className="flex items-start gap-2.5 sm:gap-3">
-          <span
-            className={cn(
-              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
-              heatPillClass("B"),
-            )}
-          >
-            WARM · B
-          </span>
-          <span>
-            Solid middle priority: meaningful demand or openness, but less extreme than A. Plan fixes on a near-term
-            roadmap after the HOT rows.
-          </span>
-        </li>
-        <li className="flex items-start gap-2.5 sm:gap-3">
-          <span
-            className={cn(
-              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
-              heatPillClass("C"),
-            )}
-          >
-            COOL · C
-          </span>
-          <span>
-            Lower relative impact in this scoring pass. Still worth tracking; pick up after HOT and WARM unless your
-            strategy targets these queries specifically.
-          </span>
-        </li>
-      </ul>
+        ))}
+      </div>
     </div>
   );
 }
 
+/** Gap list for reports — full row layout, no click-to-expand. */
 export function TopGapOpportunities({
   opportunities,
   className,
@@ -107,7 +75,6 @@ export function TopGapOpportunities({
 }: {
   opportunities: OpportunityRow[];
   className?: string;
-  /** Optional anchor id for in-page links (e.g. report hero CTA). */
   id?: string;
 }) {
   const rows = Array.isArray(opportunities) ? opportunities : [];
@@ -130,10 +97,9 @@ export function TopGapOpportunities({
 
       {rows.length === 0 ? (
         <p className="px-[22px] py-10 text-center text-[13px] leading-relaxed text-tr-mute">
-          No graded gaps for this scan yet — the API builds this list when the scan finishes (and again on each report
-          load if it was still empty). If you still see this after a <strong className="font-semibold text-tr-navy">completed</strong>{" "}
-          scan, your prompts may not match any gap pattern (e.g. brand cited across engines). Nightly jobs still
-          refresh scores for dashboards.
+          No graded gaps for this scan yet — the API builds this list when the scan finishes. If you still see this after
+          a <strong className="font-semibold text-tr-navy">completed</strong> scan, your prompts may not match any gap
+          pattern (e.g. brand cited across engines).
         </p>
       ) : (
         <ul className="divide-y divide-tr-line">
@@ -141,6 +107,7 @@ export function TopGapOpportunities({
             <li
               key={row.id}
               className="flex flex-wrap items-start gap-3 px-[22px] py-4 sm:flex-nowrap sm:gap-4"
+              data-testid="gap-summary-row"
             >
               <div
                 className={cn(

@@ -2,6 +2,7 @@
 
 import { Fragment } from "react";
 import { cn } from "@/lib/utils";
+import { matrixCellScore } from "@/lib/matrixStats";
 import type { MatrixCell } from "@/types/scan";
 
 const ENGINE_HEAD: Record<string, string> = {
@@ -10,16 +11,6 @@ const ENGINE_HEAD: Record<string, string> = {
   perplexity: "PERPLEX",
   gemini: "GEMINI",
 };
-
-function pctForCell(c: MatrixCell | undefined): number {
-  if (!c) return 0;
-  if (c.status === "cited") return 100;
-  if (c.status === "comp") return 0;
-  if (c.status === "running") return 0;
-  if (c.status === "queued") return 0;
-  if (c.status === "error") return 0;
-  return 0;
-}
 
 function cellClass(p: number) {
   if (p >= 100) return "bg-[rgba(31,179,107,0.16)] text-[#14512f]";
@@ -75,7 +66,7 @@ export function PromptEngineScoreMatrix({
               </div>
               {engines.map((e) => {
                 const c = cells.find((x) => x.promptId === p.id && x.engine === e);
-                const v = pctForCell(c);
+                const v = matrixCellScore(c);
                 return (
                   <div key={e} className={cn(bodyPct, "min-w-0", cellClass(v))}>
                     {v}%

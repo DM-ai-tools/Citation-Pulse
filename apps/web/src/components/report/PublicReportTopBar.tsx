@@ -25,7 +25,7 @@ export function PublicReportTopBar({ onPdf }: { onPdf?: () => void }) {
             <FileDown className="h-4 w-4" /> Download PDF
           </button>
           <Link
-            href="/"
+            href="/landing"
             className="inline-flex items-center gap-1.5 rounded-lg bg-brand-primary px-4 py-2 text-xs font-bold uppercase tracking-wide text-white hover:bg-brand-primaryDark"
           >
             Check your own <ArrowRight className="h-3.5 w-3.5" />

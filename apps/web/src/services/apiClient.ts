@@ -71,18 +71,31 @@ export function publicApiBaseUrl(): string {
   return upstream || "http://localhost:8000";
 }
 
+const TOKEN_KEY = "cp_access_token";
+
+function storedAccessToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export type ApiClientOptions = RequestInit & {
   getToken?: () => Promise<string | null>;
+  /** When false, never attach Authorization (public funnel endpoints). Default true in browser. */
+  auth?: boolean;
 };
 
 export async function apiClient(path: string, init: ApiClientOptions = {}) {
-  const { getToken, ...rest } = init;
+  const { getToken, auth = true, ...rest } = init;
   const headers = new Headers(rest.headers);
   if (!headers.has("Content-Type") && rest.body && typeof rest.body === "string") {
     headers.set("Content-Type", "application/json");
   }
-  if (getToken) {
-    const t = await getToken();
+  if (auth && !headers.has("Authorization")) {
+    const t = getToken ? await getToken() : storedAccessToken();
     if (t) headers.set("Authorization", `Bearer ${t}`);
   }
   return fetch(`${base()}${path}`, { ...rest, headers, credentials: "include" });

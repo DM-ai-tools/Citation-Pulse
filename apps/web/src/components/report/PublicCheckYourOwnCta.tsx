@@ -14,7 +14,7 @@ export function PublicCheckYourOwnCta() {
       </p>
       <div className="mt-5 flex justify-center">
         <Link
-          href="/"
+          href="/landing"
           className="inline-flex items-center gap-1.5 rounded-lg bg-brand-primary px-6 py-3 text-sm font-bold uppercase tracking-wide text-white shadow-md transition hover:bg-brand-primaryDark"
         >
           Run free scan <ArrowRight className="h-4 w-4" />

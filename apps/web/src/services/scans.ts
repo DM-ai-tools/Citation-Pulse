@@ -1,3 +1,4 @@
+import { formatApiErrorBody } from "@/lib/apiErrors";
 import { apiFetch, publicApiBaseUrl } from "./apiClient";
 import type { ReportData } from "@/types/report";
 import type { ScanSnapshot } from "@/types/scan";
@@ -22,7 +23,7 @@ export async function createScan(body: {
   });
   if (!r.ok) {
     const t = await r.text();
-    throw new Error(t || r.statusText);
+    throw new Error(formatApiErrorBody(r.status, t) || r.statusText);
   }
   return r.json();
 }

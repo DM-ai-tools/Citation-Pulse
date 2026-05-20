@@ -51,11 +51,18 @@ function chipBadgeClass(pct: number) {
   return "bg-rose-500 text-white";
 }
 
-/** X labels: W1 … Wn-1, then `now` (mock-style). */
-function weekAxisLabelExact(idx: number, total: number) {
-  if (total <= 1) return "now";
+/** X labels: W1 … Wn-1, then `now` for the latest week in the window. */
+function weekAxisLabel(idx: number, total: number, weekStartIso?: string) {
+  if (total <= 1) return weekStartIso ? formatWeekTick(weekStartIso) : "now";
   if (idx === total - 1) return "now";
+  if (weekStartIso) return formatWeekTick(weekStartIso);
   return `W${idx + 1}`;
+}
+
+function formatWeekTick(iso: string) {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso.slice(5);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 /** Resolve share even if API keys differ in casing from scan ``engines`` (belt-and-suspenders). */
@@ -106,7 +113,10 @@ export function BrandSovDashboard(props: {
   weekly: MultiWeeklyResponse;
   /** `page`: breadcrumbs + intro above card. `embedded`: only the white card (for scan report). */
   variant?: "page" | "embedded";
-  /** When set, chip badges use these scores (e.g. matrix engine layer scores on report). */
+  /**
+   * Optional chip badge override (e.g. citation matrix scores).
+   * Leave unset on SoV views so chips match the per-engine share bars.
+   */
   chipScores?: Record<string, number>;
   /** Engines to show in chips / bars (e.g. scan engines). Defaults to `multi.engines`. */
   enginesOrder?: string[];
@@ -134,7 +144,7 @@ export function BrandSovDashboard(props: {
     const s = weekly.series ?? [];
     return s.map((row, idx) => {
       const out: Record<string, string | number> = {
-        week: weekAxisLabelExact(idx, s.length),
+        week: weekAxisLabel(idx, s.length, row.week_start),
         _iso: row.week_start,
       };
       for (const e of ents) {
@@ -223,7 +233,10 @@ export function BrandSovDashboard(props: {
           <div className="flex flex-wrap gap-2">
           {engines.map((eng) => {
             const sharePct = Math.round(pickEngineShare(primary?.shares_by_engine ?? {}, eng) * 100);
-            const chip = chipScores ? Math.round(chipScores[eng] ?? 0) : sharePct;
+            const chip =
+              chipScores != null && Object.prototype.hasOwnProperty.call(chipScores, eng)
+                ? Math.round(chipScores[eng] ?? 0)
+                : sharePct;
             const selected = highlight === eng;
             return (
               <button
@@ -385,7 +398,7 @@ export function BrandSovDashboard(props: {
                     <XAxis type="number" domain={[0, barXMax]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
                     <YAxis type="category" dataKey="engine" width={108} tick={{ fontSize: 11 }} axisLine={false} />
                     <Tooltip formatter={(v: number) => [`${v}%`, brandName]} />
-                    <Bar dataKey="sharePct" radius={[0, 8, 8, 0]} maxBarSize={26} fill={BRAND_TEAL} name="Share" />
+                    <Bar dataKey="sharePct" radius={[0, 8, 8, 0]} maxBarSize={26} fill={BRAND_TEAL} name="Share" minPointSize={3} />
                   </BarChart>
                 </ResponsiveContainer>
               )}

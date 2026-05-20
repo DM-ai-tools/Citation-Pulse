@@ -3,10 +3,13 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
+from citationpulse.api.v1.admin_dashboard import router as admin_router
+from citationpulse.api.v1.auth import router as auth_router
 from citationpulse.api.v1.billing import router as billing_router
 from citationpulse.api.v1.competitors import router as competitors_router
 from citationpulse.api.v1.endpoints import router as v1_router
@@ -14,11 +17,10 @@ from citationpulse.api.v1.scans import router as scans_router
 from citationpulse.api.v1.operator import router as operator_router
 from citationpulse.api.v1.partner import router as partner_router
 from citationpulse.api.webhooks.stripe import router as stripe_router
-from citationpulse.core.config import celery_run_tasks_inline, get_settings
+from citationpulse.core.config import celery_run_tasks_inline, get_settings, validate_production_settings
 from citationpulse.core.observability import setup_observability
-from citationpulse.db.runtime_bootstrap import ensure_opportunities_schema
-from citationpulse.db.session import get_engine
-from citationpulse.services.dataforseo_keywords import dataforseo_configured
+from citationpulse.db.runtime_bootstrap import ensure_auth_schema
+from citationpulse.db.session import SessionLocal, get_engine
 from citationpulse.services.llm_router import openrouter_configured
 
 setup_observability()
@@ -30,12 +32,23 @@ _log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     _ = app
     s = get_settings()
+    validate_production_settings(s)
     try:
-        ensure_opportunities_schema(get_engine())
+        ensure_auth_schema(get_engine())
     except Exception:
         _log.exception(
             "startup schema bootstrap failed — check DATABASE_URL is linked to Postgres."
         )
+    try:
+        db = SessionLocal()
+        try:
+            from citationpulse.services.auth_service import ensure_default_admin
+
+            ensure_default_admin(db)
+        finally:
+            db.close()
+    except Exception:
+        _log.exception("default admin seed failed")
     if s.environment.lower() == "production" and not openrouter_configured(s):
         _log.warning(
             "OPENROUTER_API_KEY is empty on this service — scans will fail OpenRouter auth until set."
@@ -74,14 +87,6 @@ else:
     _cors_origin_regex = f"{_railway_origin_regex}|{_loopback_regex}|{_rfc1918_http_regex}"
 
 app = FastAPI(title="CitationPulse API", version="0.1.0", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins or ["*"],
-    allow_origin_regex=_cors_origin_regex,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.middleware("http")
@@ -91,6 +96,24 @@ async def security_headers(request, call_next):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return resp
+
+
+# Added last so CORS runs outermost (preflight + error responses get Allow-Origin).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins if origins else ["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origin_regex=_cors_origin_regex,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
+    _log.exception("Unhandled error %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/")
@@ -114,6 +137,7 @@ def root():
             "scan_stream": "GET /api/v1/scans/{scan_id}/stream (SSE)",
             "public_share": "GET /api/v1/scans/public/{token}",
             "brand_opportunities": "GET /api/v1/brands/{brand_id}/opportunities?status=open",
+            "brand_gaps_analysis": "GET /api/v1/brands/{brand_id}/gaps-analysis",
             "competitor_analyze": "POST /api/v1/competitors/analyze",
         },
         "web_app": "http://localhost:3000",
@@ -122,10 +146,16 @@ def root():
 
 @app.get("/health")
 def health():
+    s = get_settings()
+    jwt_ok = bool((s.auth_jwt_secret or "").strip()) and (s.auth_jwt_secret or "").strip() not in (
+        "change-me-set-AUTH_JWT_SECRET-in-production",
+        "change-me-use-openssl-rand-hex-32",
+    )
     return {
         "status": "ok",
+        "environment": s.environment,
         "openrouter_configured": openrouter_configured(),
-        "dataforseo_configured": dataforseo_configured(),
+        "auth_jwt_configured": jwt_ok,
         "celery_tasks_inline": celery_run_tasks_inline(),
     }
 
@@ -136,6 +166,8 @@ def metrics_stub():
     return {"runs_per_minute": 0, "citations_captured": 0, "engine_error_rate": 0.0}
 
 
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 app.include_router(v1_router, prefix="/api/v1")
 app.include_router(competitors_router, prefix="/api/v1")
 app.include_router(scans_router, prefix="/api/v1")

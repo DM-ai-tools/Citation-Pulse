@@ -83,8 +83,8 @@ export default function LiveScanPage() {
           <ErrorState
             message={
               q.error instanceof Error
-                ? `${q.error.message} (API: ${publicApiBaseUrl()})`
-                : `Scan could not be loaded. (API: ${publicApiBaseUrl()})`
+                ? `${q.error.message} — API: ${publicApiBaseUrl()}. Start the backend with npm run dev:api (port 8000) or npm run dev:stack from the repo root, then refresh.`
+                : `Scan could not be loaded. Start the API (npm run dev:api) then refresh. API: ${publicApiBaseUrl()}`
             }
             onRetry={() => q.refetch()}
           />

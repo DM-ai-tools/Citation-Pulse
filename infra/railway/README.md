@@ -8,13 +8,15 @@ This repo is ready for a 3-service Railway deployment:
 
 ## Config templates
 
-Template config files are provided:
+Config-as-code (set each service **Root Directory** first, then point Railway at the matching file):
 
-- `infra/railway/api.railway.json`
-- `infra/railway/worker.railway.json`
-- `infra/railway/web.railway.json`
+| Service | Root directory | Config file |
+|---------|----------------|-------------|
+| API | `apps/api` | `apps/api/railway.json` |
+| Worker | `apps/api` | `apps/api/railway.worker.json` |
+| Web | `apps/web` | `apps/web/railway.json` |
 
-Use them as copy/paste references in each Railway service's Config-as-Code or service settings.
+Legacy copies under `infra/railway/*.railway.json` match the same settings when root directory is set as above.
 
 ## Service setup
 
@@ -55,17 +57,19 @@ Railway injects **`PORT` at runtime** (commonly **`8080`**). The web `Dockerfile
 
 Set these in Railway (shared variables are fine):
 
-- `DATABASE_URL` -> Railway Postgres URL, with SQLAlchemy driver prefix:
-  - `postgresql+psycopg://...`
+- `DATABASE_URL` -> Railway Postgres URL (`postgresql://…` is auto-normalized to `postgresql+psycopg://…` on startup)
 - Optional: `FORWARDED_ALLOW_IPS=*` (or rely on the API Dockerfile / start command) so Uvicorn trusts `X-Forwarded-*` from Railway’s edge. Anonymous scan rate limits use the resolved client IP.
 - Optional: `ANONYMOUS_SCAN_RATE_LIMIT_PER_HOUR` (default **24** in app settings) to tune landing-page abuse protection; use `0` only if you accept disabling that limit.
 - `OPENROUTER_API_KEY` -> required for scans (set on **both** API and worker if you use a separate worker; missing key yields OpenRouter HTTP 401). After deploy, open `GET /health` on the API: `openrouter_configured` must be `true` (no quotes or stray spaces in the variable value).
 - `ENVIRONMENT=production`
 - `LOG_LEVEL=info`
+- `AUTH_JWT_SECRET` -> **required** (32+ random chars; weak defaults block API startup in production)
+- `AUTH_ADMIN_EMAIL` / `AUTH_ADMIN_PASSWORD` / `AUTH_ADMIN_NAME` -> seed the first admin (optional if admin already exists)
 
 Set these at minimum on API:
 
 - `API_CORS_ORIGINS=https://<your-web-domain>`
+- `INTERNAL_PHASE1=false` in production (native auth uses `AUTH_JWT_SECRET`)
 - `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` (optional) — Google Ads search-volume estimates for **Top gap opportunities** (read when building scan reports). If missing, **Est. monthly searches** stays as a dash. Not used on the Web service.
 
 Set these on Web:

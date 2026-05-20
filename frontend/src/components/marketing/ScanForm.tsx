@@ -49,7 +49,7 @@ export function ScanForm({ className }: { className?: string }) {
   const [promptTags, setPromptTags] = useState<string[]>([]);
   const [promptInput, setPromptInput] = useState("");
   const [locale, setLocale] = useState("en-AU");
-  const [autoDiscover, setAutoDiscover] = useState(true);
+  const autoDiscover = true;
   const [serviceHint, setServiceHint] = useState("");
   const [nicheHint, setNicheHint] = useState("");
   const [locationHint, setLocationHint] = useState("");
@@ -246,30 +246,25 @@ export function ScanForm({ className }: { className?: string }) {
               </span>
             </label>
             <input
-              type="url"
+              type="text"
+              inputMode="url"
               className={cn(fieldClass, "mt-1.5")}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://acme.com"
+              placeholder="hipages.com.au or https://www.example.com"
               required
               autoComplete="url"
+              spellCheck={false}
             />
           </div>
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-tr-line bg-white/60 px-3.5 py-3">
-            <input
-              type="checkbox"
-              className="mt-0.5 h-4 w-4 rounded border-tr-line text-brand-primary focus:ring-brand-primary/30"
-              checked={autoDiscover}
-              onChange={(e) => setAutoDiscover(e.target.checked)}
-            />
-            <span className="text-[13px] leading-snug text-tr-navy">
-              <span className="font-display font-bold">Auto-discover competitors</span>
-              <span className="mt-0.5 block text-tr-mute">
-                When your scan finishes, AI finds 3 same-tier peers and 3 one tier above (with cited evidence).
-              </span>
+          <p className="rounded-lg border border-tr-line bg-white/60 px-3.5 py-3 text-[13px] leading-snug text-tr-navy">
+            <span className="font-display font-bold">Auto-discover competitors</span>
+            <span className="mt-0.5 block text-tr-mute">
+              Always on — when your scan finishes, AI finds same-tier and one-tier-above peers, then checks
+              citations across ChatGPT, Claude, Gemini, and Perplexity.
             </span>
-          </label>
+          </p>
 
           <div>
             <label className="flex items-baseline justify-between font-display text-[12.5px] font-bold tracking-wide text-tr-navy">

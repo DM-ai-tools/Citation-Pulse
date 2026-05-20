@@ -11,7 +11,12 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from citationpulse.services.competitor_citation_visibility import (  # noqa: E402
+    DISPLAY_MAX_COMPETITORS,
+    TARGET_ABOVE_TIER_MAX,
+    TARGET_SAME_TIER_MAX,
     _collect_engine_citations,
+    _count_cited_by_tier,
+    _display_cited_competitors,
     _discovery_competitor_map,
     build_competitor_citation_visibility,
 )
@@ -204,9 +209,101 @@ def test_user_provided_competitors_included():
         competitor_discovery=discovery,
         prompts=[],
     )
-    domains = {r["domain"] for r in out["ranked_competitors"]}
-    assert "discovered.com.au" in domains
-    assert "airtasker.com" in domains
+    all_domains = {r["domain"] for r in out.get("all_ranked_competitors", [])}
+    assert "discovered.com.au" in all_domains
+    assert "airtasker.com" in all_domains
     assert out["user_provided_count"] >= 1
-    user_row = next(r for r in out["ranked_competitors"] if r["domain"] == "airtasker.com")
-    assert user_row["user_provided"] is True
+    # Uncited competitors are excluded from per-prompt display (rules 5–6).
+    assert out["ranked_competitors"] == []
+    assert len(out["discovery_only"]) >= 1
+
+
+def test_display_cited_tier_balanced_caps():
+    ranked = []
+    for i in range(5):
+        ranked.append(
+            {
+                "domain": f"same{i}.com.au",
+                "name": f"S{i}",
+                "level": "same_level",
+                "cited_by_engines": True,
+                "engines": ["chatgpt"],
+                "cited_engines": ["chatgpt"],
+                "engine_count": 1,
+                "citation_count": 1,
+                "citations_by_engine": {"chatgpt": [{"url": f"https://same{i}.com.au", "position": 1}]},
+                "engine_citations": [],
+                "visibility_score": 90 - i,
+            }
+        )
+    for i in range(5):
+        ranked.append(
+            {
+                "domain": f"above{i}.com.au",
+                "name": f"A{i}",
+                "level": "one_level_above",
+                "cited_by_engines": True,
+                "engines": ["chatgpt"],
+                "cited_engines": ["chatgpt"],
+                "engine_count": 1,
+                "citation_count": 1,
+                "citations_by_engine": {"chatgpt": [{"url": f"https://above{i}.com.au", "position": 2}]},
+                "engine_citations": [],
+                "visibility_score": 80 - i,
+            }
+        )
+    display = _display_cited_competitors(ranked)
+    assert len(display) == DISPLAY_MAX_COMPETITORS
+    same, above = _count_cited_by_tier(display)
+    assert same == TARGET_SAME_TIER_MAX
+    assert above == TARGET_ABOVE_TIER_MAX
+    assert all(r.get("cited_engines_detail") for r in display)
+
+
+def test_display_cited_excludes_uncited_and_balances_tiers():
+    ranked = [
+        {
+            "domain": f"c{i}.com.au",
+            "name": f"C{i}",
+            "level": "same_level" if i < 4 else "one_level_above",
+            "visibility_score": 90 - i,
+            "visibility_rank": i + 1,
+            "cited_by_engines": i != 3,
+            "engines": ["chatgpt"] if i != 3 else [],
+            "cited_engines": ["chatgpt"] if i != 3 else [],
+            "engine_count": 0 if i == 3 else 1,
+            "citation_count": 0 if i == 3 else 1,
+            "citations_by_engine": {"chatgpt": [{"url": f"https://c{i}.com.au"}]} if i != 3 else {},
+            "engine_citations": [],
+        }
+        for i in range(7)
+    ]
+    display = _display_cited_competitors(ranked)
+    assert len(display) <= DISPLAY_MAX_COMPETITORS
+    assert all(r["cited_by_engines"] for r in display)
+    assert "c3.com.au" not in {r["domain"] for r in display}
+    same, above = _count_cited_by_tier(display)
+    assert same <= TARGET_SAME_TIER_MAX
+    assert above <= TARGET_ABOVE_TIER_MAX
+
+
+def test_collect_tracked_domain_citations_without_competitor_tag():
+    cells = [
+        {
+            "promptId": "p1",
+            "engine": "chatgpt",
+            "citations": [
+                {"url": "https://airtasker.com/jobs", "ownership": "neutral"},
+                {"url": "https://random.org/", "ownership": "neutral"},
+            ],
+        },
+    ]
+    by_dom = _collect_engine_citations(
+        cells,
+        engines=["chatgpt"],
+        prompt_id="p1",
+        competitors_only=True,
+        tracked_competitor_domains={"airtasker.com"},
+    )
+    assert "airtasker.com" in by_dom
+    assert "random.org" not in by_dom

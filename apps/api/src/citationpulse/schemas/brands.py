@@ -113,6 +113,34 @@ class OpportunityRead(BaseModel):
     model_config = {"from_attributes": False}
 
 
+class OpportunityDetailRead(BaseModel):
+    """Expanded gap copy (generated on demand, cached on the opportunity row)."""
+
+    id: uuid.UUID
+    detail: str
+    source: str
+
+
+class GapAnalysisRead(BaseModel):
+    """Dashboard Gaps Analysis card payload."""
+
+    opportunity_id: uuid.UUID
+    title: str
+    short_label: str
+    grade: str
+    heat: str
+    gap_type: str
+    summary: str
+    detailed_explanation: str
+    why_it_matters: str
+    competitive_impact: str
+    suggested_direction: str
+    affected_engines: list[str] = Field(default_factory=list)
+    engine_breakdown: list[str] = Field(default_factory=list)
+    est_volume: int | None = None
+    opportunity_score: float
+
+
 class AlertRuleCreate(BaseModel):
     brand_id: uuid.UUID | None = None
     rule: str

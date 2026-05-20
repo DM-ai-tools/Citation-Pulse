@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from citationpulse.core.config import get_settings
-from citationpulse.services.engine_routing import build_engine_routes, engine_can_run
+from citationpulse.services.engine_routing import engine_can_run
 from citationpulse.models.domain import (
     Brand,
     Citation,
@@ -16,7 +16,6 @@ from citationpulse.models.domain import (
     EngineType,
     Ownership,
     Prompt,
-    PromptMetrics,
     RunStatus,
     Scan,
     Tenant,
@@ -136,6 +135,8 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
         return
     expected = expected_engine_runs_for_scan(db, scan)
     terminal, total = count_terminal_runs_for_scan(db, scan_id)
+    # Do not complete until every scheduled engine×prompt run exists (fan-out finished)
+    # and each run has reached a terminal state.
     if expected > 0 and total < expected:
         return
     if total == 0 or terminal < total:
@@ -148,27 +149,32 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
         scan.completed_at = datetime.now(timezone.utc)
     scan.score_overall = new_score
     db.commit()
+    if was_new:
+        try:
+            from citationpulse.services.competitor_pipeline import (
+                enrich_competitor_discovery_after_scan_complete,
+            )
+
+            enrich_competitor_discovery_after_scan_complete(db, scan_id)
+        except Exception:
+            _log.exception("competitor pipeline after scan completion failed scan_id=%s", scan_id)
     if was_new or prev_score != new_score:
         publish_scan_event(
             str(scan.id),
             {"type": "scan.completed", "score": scan.score_overall or 0},
         )
+    # Funnel report reads `opportunities` from the DB — populate as soon as the scan finishes
+    # (same classifier as nightly `detect_opportunities`; Celery beat still refreshes later).
     brand_id_for_detect = scan.brand_id
     engines_ov = list(scan.engines) if scan.engines else None
-    if was_new:
-        try:
-            from citationpulse.services.competitor_citation_visibility import reclassify_scan_citations
-            from citationpulse.services.competitor_discovery_scan import run_competitor_discovery_for_scan
-
-            run_competitor_discovery_for_scan(db, scan)
-            reclassify_scan_citations(db, scan)
-            db.commit()
-        except Exception:
-            _log.exception("competitor_discovery after scan completion failed scan_id=%s", scan_id)
     if was_new and brand_id_for_detect:
         try:
-            from citationpulse.services.opportunities import detect_opportunities_for_brand
+            from citationpulse.services.opportunities import (
+                detect_opportunities_for_brand,
+                sync_prompt_volumes_for_brand,
+            )
 
+            sync_prompt_volumes_for_brand(db, brand_id_for_detect)
             detect_opportunities_for_brand(db, brand_id_for_detect, engines_override=engines_ov)
         except Exception:
             _log.exception(
@@ -177,13 +183,17 @@ def maybe_complete_scan(db: Session, scan_id: UUID) -> None:
                 brand_id_for_detect,
             )
     elif brand_id_for_detect and scan.status == "completed" and not was_new:
+        # First completion hook can fail (transient DB) or run before late normalisation. Later
+        # `maybe_complete_scan` calls skip `was_new`; backfill when we still have zero open rows.
         try:
             from citationpulse.services.opportunities import (
                 detect_opportunities_for_brand,
                 list_opportunities_for_brand,
+                sync_prompt_volumes_for_brand,
             )
 
             if not list_opportunities_for_brand(db, brand_id_for_detect, status="open"):
+                sync_prompt_volumes_for_brand(db, brand_id_for_detect)
                 detect_opportunities_for_brand(db, brand_id_for_detect, engines_override=engines_ov)
         except Exception:
             _log.exception(
@@ -258,7 +268,9 @@ def cell_status_for_run(db: Session, run: EngineRun) -> dict[str, object]:
         pos = min(positions) if positions else None
         out: dict[str, object] = {**enriched, "status": "cited"}
         if pos is not None:
-            # Citations use 0-based indices in storage; matrix UI expects 1-based rank (1 = top).
+            # Citations are persisted with 0-based list indices (see ``geo._persist_citations_from_response``
+            # and ``llm_router._extract_citations``). The web UI treats ``1`` as first visible slot ("top")
+            # for breakdown cards, scores, and heatmap colours — convert here so one field is canonical.
             out["position"] = int(pos) + 1
         return out
     if comp_cites:
@@ -339,8 +351,6 @@ def build_scan_snapshot(db: Session, scan: Scan) -> dict[str, object]:
         "submitted_url": scan.submitted_url,
         "locale": scan.locale,
         "engines": visible_engines,
-        "engine_routes": build_engine_routes(visible_engines),
-        "execution_mode": "parallel" if get_settings().scan_parallel_engines else "sequential",
         "score_overall": scan.score_overall,
         "share_public": scan.share_public,
         "share_token": scan.share_token,
@@ -408,6 +418,19 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
             if cb:
                 competitors.append({"id": str(cb.id), "name": cb.name, "domains": ",".join(cb.domains or [])})
 
+    # Multi-entity SoV for the report page: anonymous funnel users cannot call
+    # ``GET /api/v1/brands/{id}/sov/*`` (Clerk-protected), so embed the same payload here.
+    sov_multi_engine: dict[str, object] | None = None
+    sov_multi_weekly_trend: dict[str, object] | None = None
+    if brand:
+        from citationpulse.services.sov_entities import (
+            multi_entity_weekly_share_trend,
+            multientity_sov_by_engine,
+        )
+
+        sov_multi_engine = multientity_sov_by_engine(db, brand.tenant_id, brand.id, days=84)
+        sov_multi_weekly_trend = multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=12)
+
     opportunities: list[dict[str, object]] = []
     if brand:
         from citationpulse.services.dataforseo_keywords import dataforseo_configured
@@ -415,25 +438,18 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
             detect_opportunities_for_brand,
             heat_from_grade,
             list_opportunities_for_brand,
-            sync_prompt_volumes_for_brand,
         )
 
         rows = list_opportunities_for_brand(db, brand.id, status="open")
-        brand_prompts = list(
-            db.scalars(select(Prompt).where(Prompt.brand_id == brand.id, Prompt.enabled.is_(True))).all()
-        )
-        lacks_prompt_metrics = any(
-            (m := db.get(PromptMetrics, p.id)) is None or m.est_volume is None for p in brand_prompts
-        )
-        missing_opp_volume = bool(rows) and any(o.est_volume is None for o in rows)
-        should_refresh = scan.status == "completed" and dataforseo_configured() and (
-            not rows or lacks_prompt_metrics or missing_opp_volume
+        missing_volume = bool(rows) and any(o.est_volume is None for o in rows)
+        should_refresh = scan.status == "completed" and (
+            not rows or (missing_volume and dataforseo_configured())
         )
         if should_refresh:
             try:
+                from citationpulse.services.opportunities import sync_prompt_volumes_for_brand
+
                 eng_ov = list(scan.engines) if scan.engines else None
-                # Pull DataForSEO volumes first so the new detect/upsert pass below
-                # writes them into `opportunities.est_volume` in one go.
                 sync_prompt_volumes_for_brand(db, brand.id)
                 detect_opportunities_for_brand(db, brand.id, engines_override=eng_ov)
                 rows = list_opportunities_for_brand(db, brand.id, status="open")
@@ -471,6 +487,30 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
     )
 
     competitor_discovery = competitor_discovery_for_report(scan) if scan.status == "completed" else None
+    if scan.status == "completed" and isinstance(competitor_discovery, dict) and competitor_discovery:
+        params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
+        from citationpulse.services.competitor_discovery_scan import auto_discover_enabled
+
+        if auto_discover_enabled(scan):
+            try:
+                from citationpulse.services.competitor_pipeline import enrich_competitor_discovery_for_scan
+
+                cells_pre = list((snap.get("matrix") or {}).get("cells") or [])
+                engines_pre = list(snap.get("engines") or [])
+                prompts_pre = list(snap.get("prompts") or [])
+                enriched = enrich_competitor_discovery_for_scan(
+                    db,
+                    scan,
+                    cells=cells_pre,
+                    engines=engines_pre,
+                    prompts=prompts_pre,
+                )
+                if enriched:
+                    competitor_discovery = enriched
+                db.commit()
+            except Exception:
+                _log.exception("enrich_competitor_discovery during build_scan_report scan_id=%s", scan.id)
+                db.rollback()
 
     user_provided_competitors: list[dict[str, object]] = []
     params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
@@ -481,7 +521,7 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
                     "domain": str(row["domain"]),
                     "name": str(row.get("name") or row["domain"]),
                     "level": "user_provided",
-                    "tier": "You provided",
+                    "tier": "4",
                     "source": "user",
                 }
             )
@@ -497,7 +537,7 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
                         "domain": dom,
                         "name": str(c.get("name") or dom),
                         "level": "user_provided",
-                        "tier": "You provided",
+                        "tier": "4",
                         "source": "user",
                     }
                 )
@@ -564,5 +604,7 @@ def build_scan_report(db: Session, scan: Scan) -> dict[str, object]:
         "competitor_citation_visibility": competitor_citation_visibility,
         "user_provided_competitors": user_provided_competitors,
         "analysis_competitors": analysis_competitors,
+        "sov_multi_engine": sov_multi_engine,
+        "sov_multi_weekly_trend": sov_multi_weekly_trend,
         "opportunities": opportunities,
     }

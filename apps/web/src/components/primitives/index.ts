@@ -1,11 +1,7 @@
 export { Button } from "./Button";
 export { Card } from "./Card";
-export { Chip } from "./Chip";
-export { Pill } from "./Pill";
 export { Input } from "./Input";
 export { Select } from "./Select";
-export { Tab, TabList } from "./Tabs";
-export { ProgressBar } from "./ProgressBar";
 export { Spinner } from "./Spinner";
 export { Skeleton } from "./Skeleton";
 export { ErrorState } from "./ErrorState";

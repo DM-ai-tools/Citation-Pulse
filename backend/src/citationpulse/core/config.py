@@ -2,26 +2,28 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# apps/api/src/citationpulse/core/config.py → repo root is parents[5]
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+_API_ROOT = Path(__file__).resolve().parents[3]
 
-def _normalise_db_url(v: str) -> str:
-    """Rewrite bare postgres:// or postgresql:// to use the psycopg3 driver.
 
-    Railway (and most PaaS) inject DATABASE_URL without a driver suffix.
-    SQLAlchemy would then try psycopg2 (not installed); we use psycopg v3.
-    """
-    for prefix in ("postgres://", "postgresql://"):
-        if v.startswith(prefix):
-            return "postgresql+psycopg://" + v[len(prefix):]
-    return v
+def _settings_env_files() -> tuple[str, ...]:
+    """Absolute paths so uvicorn cwd (apps/api) still loads the monorepo .env."""
+    out: list[str] = []
+    for p in (_REPO_ROOT / ".env", _API_ROOT / ".env", Path(".env")):
+        if p.is_file():
+            out.append(str(p))
+    return tuple(out)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "../../.env"),
+        env_file=_settings_env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -29,31 +31,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = "postgresql+psycopg://citationpulse:citationpulse@localhost:5434/citationpulse_geo"
 
-    @field_validator("database_url", mode="before")
-    @classmethod
-    def normalise_database_url(cls, v: str) -> str:
-        return _normalise_db_url(v)
-
     # Postgres-backed Celery (no Redis required). Defaults derive from `database_url` at runtime
     # via `effective_celery_broker_url` / `effective_celery_result_backend`.
     celery_broker_url: str = ""
     celery_result_backend: str = ""
-
-    # --- Optional Redis cache (Top Gap Opportunities) ---
-    # When set, DataForSEO lookups + cross-tenant demand-similarity entries are
-    # cached in Redis for 7d via ``services.cache``. When unset the cache layer
-    # falls back to an in-process LRU so the pipeline still runs (just less
-    # efficiently across worker processes).
-    redis_url: str = ""
-
-    # --- Top Gap Opportunities tuning ---
-    # Volume threshold (per locale) above which DataForSEO is considered a
-    # usable demand signal. Below this we fall through to keyword variants.
-    demand_min_literal_volume: int = 50
-    demand_min_variant_volume: int = 50
-    # Bucket thresholds — surface on the row pill as HIGH / MEDIUM / LOW.
-    demand_high_volume: int = 5000
-    demand_medium_volume: int = 500
 
     # SSE polling interval for live scan stream (seconds). Tradeoff: lower = snappier UI,
     # higher = less DB load. 0.5–1.0s is a fine sweet spot for dev.
@@ -86,9 +67,9 @@ class Settings(BaseSettings):
     stripe_price_saas: str = ""  # $597/mo price id
     stripe_price_dfy: str = ""  # $1200/mo price id
 
-    # --- Hybrid LLM routing ---
-    # ChatGPT → OPENAI_API_KEY (direct, parallel). Claude → ANTHROPIC_API_KEY (direct).
-    # Gemini + Perplexity → OPENROUTER_API_KEY only. See services/engine_routing.py.
+    # Hybrid routing: ChatGPT/Claude use direct keys when set; Gemini/Perplexity use OpenRouter.
+    # Set CLAUDE_PREFER_OPENROUTER=true to skip Anthropic direct (e.g. when direct credits are exhausted).
+    claude_prefer_openrouter: bool = False
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Optional OpenRouter analytics headers — appear on the public leaderboard
@@ -99,6 +80,7 @@ class Settings(BaseSettings):
     @field_validator("openrouter_api_key", mode="before")
     @classmethod
     def normalise_openrouter_api_key(cls, v: object) -> str:
+        """Strip whitespace / accidental wrapping quotes so Railway .env typos don't yield HTTP 401."""
         if v is None:
             return ""
         s = str(v).strip()
@@ -116,7 +98,6 @@ class Settings(BaseSettings):
             s = s[1:-1].strip()
         return s
 
-    # Direct provider keys (preferred for ChatGPT + Claude — lower latency).
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     google_ai_api_key: str = ""
@@ -129,14 +110,12 @@ class Settings(BaseSettings):
     # OpenRouter's web-search plugin for citation grounding on models that
     # don't have native web search (ChatGPT / Claude / Gemini). Perplexity's
     # `sonar` already has native web search, so no `:online` suffix.
-    # OpenRouter slugs (Gemini + Perplexity; also fallback for ChatGPT/Claude).
     chatgpt_model: str = "openai/gpt-4o-mini:online"
-    claude_model: str = "anthropic/claude-3.5-haiku:online"
+    claude_model: str = "anthropic/claude-sonnet-4:online"
     gemini_model: str = "google/gemini-2.0-flash-001:online"
     perplexity_model: str = "perplexity/sonar"
-    # Direct API model ids when OPENAI_API_KEY / ANTHROPIC_API_KEY are set.
     openai_direct_model: str = "gpt-4o-mini-search-preview"
-    anthropic_direct_model: str = "claude-3-5-haiku-latest"
+    anthropic_direct_model: str = "claude-sonnet-4-5-20250929"
 
     # Sentiment classifier — uses a cheap fast model. Same OpenRouter slug
     # convention. No `:online` because we don't need web search for sentiment.
@@ -147,13 +126,9 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_max_tokens: int = 1024
 
-    # Run all engine calls for a scan concurrently (asyncio.gather in one Celery task).
-    scan_parallel_engines: bool = True
-    scan_parallel_max_concurrent: int = 8
-
-    # Competitor discovery (POST /api/v1/competitors/analyze) — large JSON payload.
-    competitor_discovery_model: str = "openai/gpt-4o-mini:online"
-    competitor_discovery_max_tokens: int = 12288
+    # Competitor discovery (POST /api/v1/competitors/analyze) — web-grounded JSON via OpenRouter.
+    competitor_discovery_model: str = "perplexity/sonar"
+    competitor_discovery_max_tokens: int = 8192
     competitor_analyze_rate_limit_per_hour: int = 12
     competitor_analyze_mesh_rate_limit_per_hour: int = 120
 
@@ -189,17 +164,12 @@ class Settings(BaseSettings):
 
     # --- DataForSEO (optional) — Google Ads monthly search volumes by geo ---
     # https://docs.dataforseo.com/v3/keywords_data/google_ads/search_volume/live/
-    # When both are set, scan completion will sync per-prompt monthly search
-    # volumes into ``prompt_metrics`` and the opportunities ``est_volume`` column.
-    # Unset both to skip DataForSEO entirely — opportunities still render with
-    # ``est_volume = null`` and the UI falls back to a dash.
     dataforseo_login: str = ""
     dataforseo_password: str = ""
 
     @field_validator("dataforseo_password", "dataforseo_login", mode="before")
     @classmethod
     def normalise_dataforseo_secrets(cls, v: object) -> str:
-        """Strip whitespace / accidental wrapping quotes so Railway .env typos don't yield HTTP 401."""
         if v is None:
             return ""
         s = str(v).strip()
@@ -233,6 +203,7 @@ def effective_celery_result_backend(s: Settings | None = None) -> str:
 
 
 def _is_railway_deploy() -> bool:
+    """True when the process runs on Railway (any service in the project)."""
     return any(
         os.environ.get(k)
         for k in (
@@ -246,6 +217,11 @@ def _is_railway_deploy() -> bool:
 
 
 def celery_run_tasks_inline(s: Settings | None = None) -> bool:
+    """Run Celery tasks in-process (``task_always_eager``) instead of a worker consumer.
+
+    Local dev defaults to inline so scans work without ``celery worker``.
+    On Railway, inline is enabled unless ``CELERY_USE_WORKER=1`` (separate worker service).
+    """
     s = s or get_settings()
     eager_env = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "").strip().lower()
     use_worker = os.environ.get("CELERY_USE_WORKER", "").strip().lower() in ("1", "true", "yes")

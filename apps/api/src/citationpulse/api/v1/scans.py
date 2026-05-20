@@ -17,7 +17,7 @@ from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEve
 from citationpulse.schemas.scans import ScanCreate, ScanCreateResponse, ShareBody
 from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
 from citationpulse.services.rate_limit import allow_anonymous_scan
-from citationpulse.services.normalization import canonicalize_url, registrable_domain
+from citationpulse.services.normalization import canonicalize_url, ensure_https_url, registrable_domain
 from citationpulse.services.brand_dashboard import parse_range_days
 from citationpulse.services.competitor_discovery_scan import discovery_params_from_body
 from citationpulse.services.scans_flow import (
@@ -76,7 +76,7 @@ def create_scan(
     if not allow_anonymous_scan(rl_key, limit_per_hour=rl_limit):
         raise HTTPException(status_code=429, detail="Too many scans from this IP — try again later")
 
-    url = canonicalize_url(str(body.url))
+    url = ensure_https_url(str(body.url))
     root = registrable_domain(url)
     if not root:
         raise HTTPException(status_code=400, detail="Could not parse domain from URL")
@@ -128,8 +128,8 @@ def create_scan(
         user_provided.append({"domain": dom, "name": dom})
     if user_provided:
         discovery_params["user_provided_competitors"] = user_provided
-    if discovery_params.get("auto_discover", True):
-        discovery_params["discovery_status"] = "pending"
+    discovery_params["auto_discover"] = True
+    discovery_params["discovery_status"] = "pending"
 
     scan = Scan(
         tenant_id=tenant.id,

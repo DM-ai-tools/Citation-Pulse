@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import re
-import unicodedata
 from typing import Any
 
 import httpx
@@ -32,223 +30,6 @@ _log = logging.getLogger(__name__)
 DATAFORSEO_SEARCH_VOLUME_URL = (
     "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live"
 )
-
-# Google Ads search-volume live — https://docs.dataforseo.com/v3/keywords_data/google_ads/search_volume/live/
-DATAFORSEO_MAX_KEYWORD_CHARS = 80
-DATAFORSEO_MAX_KEYWORD_WORDS = 10
-_INVALID_KW_CHARS = re.compile(r"[?!;:\"'()[\]{}<>@#$%^&*\\|~`]")
-_DOMAIN_RE = re.compile(
-    r"\b[\w][\w-]*\.(?:com|net|org|io|co|au)(?:\.[a-z]{2})?\b",
-    re.IGNORECASE,
-)
-_COMPARE_PREFIX_RE = re.compile(
-    r"^\s*(?:compare|comparison|versus|vs\.?|between)\b\s*",
-    re.IGNORECASE,
-)
-_BRAND_NOISE = re.compile(
-    r"hipages|oneflare|airtasker|serviceseeking|\.com\b|\.au\b",
-    re.IGNORECASE,
-)
-
-
-def _to_ascii_keyword_text(text: str) -> str:
-    """Google Ads keywords reject many Unicode symbols (smart quotes, em dashes, etc.)."""
-    s = (text or "").replace("\ufffd", " ")
-    for src, dst in (
-        ("\u2018", "'"),
-        ("\u2019", "'"),
-        ("\u201c", '"'),
-        ("\u201d", '"'),
-        ("\u2013", "-"),
-        ("\u2014", "-"),
-        ("\u2026", " "),
-        ("\u00a0", " "),
-    ):
-        s = s.replace(src, dst)
-    normalized = unicodedata.normalize("NFKD", s)
-    return "".join(ch for ch in normalized if ord(ch) < 128)
-
-
-def normalize_keyword_for_dataforseo(text: str) -> str:
-    """Fit a scan prompt or phrase to Google Ads keyword limits (80 chars, 10 words)."""
-    cleaned = _to_ascii_keyword_text(text)
-    cleaned = _INVALID_KW_CHARS.sub(" ", cleaned)
-    cleaned = cleaned.strip(" '\"`")
-    words = cleaned.split()
-    words = [w.strip("'\"`") for w in words if w.strip("'\"`.")]
-    if len(words) > DATAFORSEO_MAX_KEYWORD_WORDS:
-        words = words[:DATAFORSEO_MAX_KEYWORD_WORDS]
-    kw = " ".join(words)
-    if len(kw) <= DATAFORSEO_MAX_KEYWORD_CHARS:
-        return kw
-    out: list[str] = []
-    length = 0
-    for word in words:
-        add = len(word) + (1 if out else 0)
-        if length + add > DATAFORSEO_MAX_KEYWORD_CHARS:
-            break
-        out.append(word)
-        length += add
-    if not out and words:
-        return words[0][:DATAFORSEO_MAX_KEYWORD_CHARS].strip()
-    return " ".join(out).strip()
-
-
-def search_volume_from_row(row: dict[str, Any]) -> int | None:
-    """Parse monthly search volume from a DataForSEO keyword row."""
-    sv = row.get("search_volume")
-    if isinstance(sv, (int, float)) and sv >= 0:
-        return int(sv)
-    monthly = row.get("monthly_searches")
-    if isinstance(monthly, list):
-        vals = [
-            int(m.get("search_volume"))
-            for m in monthly
-            if isinstance(m, dict)
-            and isinstance(m.get("search_volume"), (int, float))
-            and m.get("search_volume", -1) >= 0
-        ]
-        if vals:
-            return int(sum(vals) / len(vals))
-    return None
-
-
-def extract_volume_keyword_candidates(prompt_text: str, *, max_candidates: int = 6) -> list[str]:
-    """Build short Google-Ads-style phrases when the full scan prompt has no volume data."""
-    raw = (prompt_text or "").strip().lstrip('"').rstrip('"')
-    if not raw:
-        return []
-
-    candidates: list[str] = []
-    seen: set[str] = set()
-
-    def add(phrase: str) -> None:
-        kw = normalize_keyword_for_dataforseo(phrase)
-        if not kw or kw.startswith("-") or kw.startswith("platform is"):
-            return
-        key = kw.lower()
-        if key not in seen:
-            seen.add(key)
-            candidates.append(kw)
-
-    add(raw)
-    stripped = _COMPARE_PREFIX_RE.sub("", raw)
-    stripped = _DOMAIN_RE.sub(" ", stripped)
-    stripped = _BRAND_NOISE.sub(" ", stripped)
-    stripped = re.sub(r"\b(?:and|or|the|best|top|leading|websites? to hire an?)\b", " ", stripped, flags=re.IGNORECASE)
-    stripped = " ".join(stripped.split())
-    if stripped and stripped.lower() != raw.lower():
-        add(stripped)
-
-    # "… for <service> … in <location>"
-    for m in re.finditer(
-        r"\b(?:for|in)\s+([A-Za-z][\w\s'-]{2,48})",
-        stripped,
-        flags=re.IGNORECASE,
-    ):
-        add(m.group(1).strip())
-
-    loc_m = re.search(r"\bin\s+([A-Za-z][A-Za-z\s'-]{2,32})\s*$", stripped, flags=re.IGNORECASE)
-    if loc_m:
-        loc = loc_m.group(1).strip()
-        city = loc.split()[0] if loc else ""
-        head = re.split(r"\b(?:for|in)\b", stripped, maxsplit=1, flags=re.IGNORECASE)[0]
-        head = " ".join(_DOMAIN_RE.sub(" ", head).split())
-        head = re.sub(r"\b(?:quotes?|services?|providers?)\b", "", head, flags=re.IGNORECASE)
-        head = " ".join(head.split())
-        if head:
-            add(f"{head} {loc}")
-        low = stripped.lower()
-        if "renovation" in low:
-            add(f"home renovation {city}")
-        if "plumber" in low:
-            add(f"plumber {city}")
-        if "electrician" in low:
-            add(f"electrician {city}")
-        if "tradie" in low:
-            add(f"tradie quotes {city}" if city else "tradie quotes")
-            if "australia" in low:
-                add("tradie quotes australia")
-
-    words = stripped.split()
-    if len(words) >= 3:
-        add(" ".join(words[-5:]))
-        add(" ".join(words[-3:]))
-
-    return candidates[:max_candidates]
-
-
-def clean_service_keywords(candidates: list[str]) -> list[str]:
-    """Keywords without competitor domains — Google Ads returns volumes more reliably."""
-    out: list[str] = []
-    seen: set[str] = set()
-    for cand in candidates:
-        if len(cand.split()) < 2 or _BRAND_NOISE.search(cand):
-            continue
-        key = cand.lower()
-        if key not in seen:
-            seen.add(key)
-            out.append(cand)
-    return out
-
-
-def build_volume_map(rows: list[dict[str, Any]]) -> dict[str, int]:
-    vol_map: dict[str, int] = {}
-    for row in rows:
-        volume = search_volume_from_row(row)
-        if volume is None:
-            continue
-        for field in ("keyword", "spell"):
-            raw_key = row.get(field)
-            if isinstance(raw_key, str) and raw_key.strip():
-                k = raw_key.strip().lower()
-                prev = vol_map.get(k)
-                if prev is None or volume > prev:
-                    vol_map[k] = volume
-    return vol_map
-
-
-def best_volume_for_candidates(
-    candidates: list[str],
-    vol_map: dict[str, int],
-    *,
-    location_code: int,
-    language_code: str = "en",
-    settings: Settings | None = None,
-    max_single_retries: int = 1,
-) -> int | None:
-    """Pick the best volume from a map; optionally retry one clean keyword individually."""
-    ordered = clean_service_keywords(candidates) + [
-        c for c in candidates if c not in clean_service_keywords(candidates)
-    ]
-    volume: int | None = None
-    for cand in ordered:
-        hit = vol_map.get(cand.lower())
-        if hit is not None and len(cand.split()) >= 2:
-            if volume is None or hit > volume:
-                volume = hit
-    if volume is not None:
-        return volume
-
-    retries = 0
-    for cand in clean_service_keywords(candidates):
-        if retries >= max_single_retries:
-            break
-        retries += 1
-        try:
-            rows = fetch_google_ads_search_volumes(
-                [cand],
-                location_code=location_code,
-                language_code=language_code,
-                settings=settings,
-            )
-        except DataForSEOError:
-            continue
-        hit = search_volume_from_row(rows[0]) if rows else None
-        if hit is not None:
-            vol_map[cand.lower()] = hit
-            return hit
-    return None
 
 
 def dataforseo_configured(settings: Settings | None = None) -> bool:
@@ -303,23 +84,8 @@ def fetch_google_ads_search_volumes(
     # It always returns the last-12-months average in `search_volume` plus a
     # `search_volume_trend` array [{year, month, search_volume}, ...] for each month.
     # Callers should filter `search_volume_trend` client-side for a specific month.
-    api_keywords: list[str] = []
-    seen: set[str] = set()
-    for raw in keywords[:1000]:
-        kw = normalize_keyword_for_dataforseo(raw)
-        if not kw:
-            continue
-        key = kw.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        api_keywords.append(kw)
-
-    if not api_keywords:
-        return []
-
     task: dict[str, Any] = {
-        "keywords": api_keywords,
+        "keywords": keywords[:1000],
         "location_code": int(location_code),
         "language_code": language_code,
     }
@@ -331,7 +97,7 @@ def fetch_google_ads_search_volumes(
 
     _log.debug(
         "DataForSEO search-volume: %d keywords, location=%s, lang=%s",
-        len(api_keywords),
+        len(keywords),
         location_code,
         language_code,
     )
@@ -378,22 +144,6 @@ def fetch_google_ads_search_volumes(
                 out.append(item)
 
     if errors and not out:
-        # Drop keywords with invalid chars and retry once (one bad keyword fails the whole task).
-        if any("40501" in e or "Invalid Field" in e for e in errors) and len(api_keywords) > 1:
-            safe = [kw for kw in api_keywords if kw == normalize_keyword_for_dataforseo(kw)]
-            safe = list(dict.fromkeys(safe))
-            if safe and safe != api_keywords:
-                _log.warning(
-                    "DataForSEO keyword batch rejected; retrying with %d/%d sanitized keywords",
-                    len(safe),
-                    len(api_keywords),
-                )
-                return fetch_google_ads_search_volumes(
-                    safe,
-                    location_code=location_code,
-                    language_code=language_code,
-                    settings=s,
-                )
         raise DataForSEOError("; ".join(errors))
 
     if errors:

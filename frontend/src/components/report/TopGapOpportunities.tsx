@@ -118,62 +118,30 @@ function DemandTooltip({ row }: { row: OpportunityRow }) {
   );
 }
 
+const GRADE_LEGEND = [
+  { swatch: "bg-rose-400", label: "HOT · A — fix first" },
+  { swatch: "bg-amber-400", label: "WARM · B — plan next" },
+  { swatch: "bg-cyan-400", label: "COOL · C — track later" },
+] as const;
+
 function OpportunitiesLegendFootnote() {
   return (
-    <div className="border-t border-tr-line bg-tr-pale/35 px-[22px] py-4">
-      <p className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-navy">
-        How to read grades
-      </p>
-      <p className="mt-2 text-[12px] leading-relaxed text-tr-mute">
-        The <span className="font-semibold text-tr-navy">pill</span> on each row matches the tier. The{" "}
-        <span className="font-semibold text-tr-navy">letter</span> in the square (A, B, or C) is the same priority level
-        in short form. The model ranks from estimated monthly searches, how open the gap is across engines, competitor
-        citations there, and how long the gap has persisted without closing.
-      </p>
-      <ul className="mt-3 list-none space-y-2.5 pl-0 text-[12px] leading-relaxed text-tr-mute">
-        <li className="flex items-start gap-2.5 sm:gap-3">
-          <span
-            className={cn(
-              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
-              heatPillClass("A"),
-            )}
-          >
-            HOT · A
+    <div className="border-t border-tr-line bg-tr-pale/35 px-[22px] py-3">
+      <div
+        className="flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[10px] border border-tr-line bg-white px-4 py-3 text-[11.5px] text-tr-body"
+        role="list"
+        aria-label="How to read grades"
+      >
+        <span className="font-display text-[10px] font-extrabold uppercase tracking-wide text-tr-navy">
+          How to read grades
+        </span>
+        {GRADE_LEGEND.map((item) => (
+          <span key={item.label} className="inline-flex items-center gap-1.5" role="listitem">
+            <span className={cn("h-3.5 w-3.5 shrink-0 rounded", item.swatch)} aria-hidden />
+            {item.label}
           </span>
-          <span>
-            Highest urgency: strong search upside and/or a sharp gap (for example absent on several engines or heavy
-            competitor presence). Treat these prompts first in content and AI-visibility work.
-          </span>
-        </li>
-        <li className="flex items-start gap-2.5 sm:gap-3">
-          <span
-            className={cn(
-              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
-              heatPillClass("B"),
-            )}
-          >
-            WARM · B
-          </span>
-          <span>
-            Solid middle priority: meaningful demand or openness, but less extreme than A. Plan fixes on a near-term
-            roadmap after the HOT rows.
-          </span>
-        </li>
-        <li className="flex items-start gap-2.5 sm:gap-3">
-          <span
-            className={cn(
-              "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-display text-[9.5px] font-extrabold uppercase tracking-wide sm:text-[10px]",
-              heatPillClass("C"),
-            )}
-          >
-            COOL · C
-          </span>
-          <span>
-            Lower relative impact in this scoring pass. Still worth tracking; pick up after HOT and WARM unless your
-            strategy targets these queries specifically.
-          </span>
-        </li>
-      </ul>
+        ))}
+      </div>
     </div>
   );
 }

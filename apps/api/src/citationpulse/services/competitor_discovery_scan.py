@@ -14,10 +14,12 @@ from citationpulse.services.competitor_discovery import (
     CompetitorDiscoveryError,
     analyze_competitors,
 )
-from citationpulse.services.competitor_discovery_limits import MAX_TRACKED_COMPETITOR_BRANDS
 from citationpulse.services.normalization import registrable_domain
 
 _log = logging.getLogger(__name__)
+
+# No practical cap on how many competitor brands we link for a scan (UI shows all engine-cited).
+_MAX_TRACKED_COMPETITORS = 64
 
 
 def _locale_to_market(locale: str) -> str:
@@ -36,7 +38,8 @@ def _locale_to_market(locale: str) -> str:
 def discovery_params_from_body(body: Any) -> dict[str, Any]:
     """Serialize optional discovery hints from POST /scans (stored until scan completes)."""
     return {
-        "auto_discover": bool(getattr(body, "auto_discover_competitors", True)),
+        # Always on — competitor landscape + expansion run for every scan.
+        "auto_discover": True,
         "competitor_type": getattr(body, "competitor_type", None),
         "service": (getattr(body, "service", None) or "").strip() or None,
         "niche": (getattr(body, "niche", None) or "").strip() or None,
@@ -83,7 +86,7 @@ def _ensure_competitor_brands(
     root = (main_brand.domains[0] if main_brand.domains else main_brand.name).lower()
 
     for dom in domains:
-        if len(existing_ids) >= MAX_TRACKED_COMPETITOR_BRANDS:
+        if len(existing_ids) >= _MAX_TRACKED_COMPETITORS:
             break
         if dom.lower() == root or dom.lower() in existing_domains:
             continue
@@ -93,7 +96,7 @@ def _ensure_competitor_brands(
         existing_ids.append(cb.id)
         existing_domains.add(dom.lower())
 
-    main_brand.competitors = existing_ids[:MAX_TRACKED_COMPETITOR_BRANDS]
+    main_brand.competitors = existing_ids[:_MAX_TRACKED_COMPETITORS]
     db.flush()
     return list(main_brand.competitors or [])
 
@@ -108,7 +111,7 @@ def run_competitor_discovery_for_scan(
         return None
 
     params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
-    if not params.get("auto_discover", True):
+    if not auto_discover_enabled(scan):
         return None
     # Scans created before discovery_params existed: still run when not stored yet.
     if not params and scan.competitor_discovery:
@@ -168,9 +171,9 @@ def competitor_discovery_pending(scan: Scan) -> bool:
     """True while tiered discovery runs (before engine citation checks)."""
     if isinstance(scan.competitor_discovery, dict) and scan.competitor_discovery:
         return False
-    params = _discovery_params(scan)
-    if not params.get("auto_discover", True):
+    if not auto_discover_enabled(scan):
         return False
+    params = _discovery_params(scan)
     status = params.get("discovery_status")
     if status in ("failed", "skipped", "done"):
         return False
@@ -178,8 +181,9 @@ def competitor_discovery_pending(scan: Scan) -> bool:
 
 
 def auto_discover_enabled(scan: Scan) -> bool:
-    params = _discovery_params(scan)
-    return bool(params.get("auto_discover", True))
+    """Competitor auto-discovery is always enabled (ignores legacy ``auto_discover: false`` on old scans)."""
+    _ = scan
+    return True
 
 
 def competitor_discovery_for_report(scan: Scan) -> dict[str, object] | None:

@@ -8,7 +8,7 @@ import { DASHBOARD_LAST_SCAN_STORAGE_KEY } from "@/lib/dashboardScanPreference";
 
 const links = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard/sov", label: "Share of voice" },
+  { href: "/dashboard/gaps", label: "Gaps" },
 ];
 
 function useWorkspaceLogoHref() {
@@ -45,19 +45,23 @@ export function AppSidebar({ mobile = false, onNavigate }: { mobile?: boolean; o
       <Link href={logoHref} className="mb-4 font-display text-lg font-bold text-ink-900" onClick={onNavigate}>
         Citation<span className="text-brand-primary">Pulse</span>
       </Link>
-      {links.map((l) => (
-        <Link
-          key={l.href}
-          href={l.href}
-          onClick={onNavigate}
-          className={cn(
-            "rounded-lg px-3 py-2 text-sm font-medium",
-            pathname === l.href ? "bg-ink-900 text-white" : "text-ink-800 hover:bg-slate-100",
-          )}
-        >
-          {l.label}
-        </Link>
-      ))}
+      {links.map((l) => {
+        const active =
+          l.href === "/dashboard" ? pathname === "/dashboard" : pathname === l.href || pathname.startsWith(`${l.href}/`);
+        return (
+          <Link
+            key={l.href}
+            href={l.href}
+            onClick={onNavigate}
+            className={cn(
+              "rounded-lg px-3 py-2 text-sm font-medium",
+              active ? "bg-ink-900 text-white" : "text-ink-800 hover:bg-slate-100",
+            )}
+          >
+            {l.label}
+          </Link>
+        );
+      })}
     </aside>
   );
 }

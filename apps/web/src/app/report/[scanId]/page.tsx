@@ -107,6 +107,12 @@ export default function ReportPage() {
     [q.data],
   );
 
+  const discoveryValidatedCount = useMemo(() => {
+    const vs = q.data?.competitor_discovery?.validation_summary;
+    if (!vs) return 0;
+    return (vs.same_level_validated ?? 0) + (vs.one_level_above_validated ?? 0);
+  }, [q.data?.competitor_discovery]);
+
   /** Prefer SoV embedded in the report; otherwise fetch via scan (public), never ``/brands/.../sov`` (Clerk). */
   const brandIdForSov = q.data?.brand?.id ?? null;
   const embeddedMulti = q.data?.sov_multi_engine;
@@ -226,7 +232,6 @@ export default function ReportPage() {
             brandName={brandName}
             multi={multiSov}
             weekly={weeklySov}
-            chipScores={scores}
             enginesOrder={engines}
             engineControl={{ value: layer, onChange: setLayer }}
           />
@@ -298,12 +303,13 @@ export default function ReportPage() {
               (d.competitor_discovery_status === "failed" ||
                 d.competitor_discovery_status === "skipped")
             }
+            discoveryValidatedCount={discoveryValidatedCount}
           />
         </div>
       </div>
 
       <p className="pb-10 text-center text-[13px] text-tr-mute">
-        <Link href="/" className="font-semibold text-brand-primary hover:underline">
+        <Link href="/landing" className="font-semibold text-brand-primary hover:underline">
           ← Landing
         </Link>
         <span className="mx-2">·</span>

@@ -15,7 +15,7 @@ export function MarketingFooter() {
               — in 60 seconds.
             </h2>
             <Link
-              href="#top"
+              href="/landing#top"
               className="landing-gradient-cta shrink-0 rounded-lg px-8 py-4 font-display text-[14.5px] font-bold uppercase tracking-wide text-white transition"
             >
               Run free scan →
@@ -30,9 +30,12 @@ export function MarketingFooter() {
               Citation<span className="text-brand-primary">Pulse</span> · A Traffic Radius product
             </p>
             <div className="flex flex-wrap gap-4">
-              <span className="cursor-default opacity-70">Privacy</span>
-              <span className="cursor-default opacity-70">Terms</span>
-              <span className="cursor-default opacity-70">Contact</span>
+              <Link href="/privacy" className="opacity-70 transition hover:text-white hover:opacity-100">
+                Privacy
+              </Link>
+              <Link href="/terms" className="opacity-70 transition hover:text-white hover:opacity-100">
+                Terms
+              </Link>
             </div>
             <div>
               <a href="tel:1300852340" className="font-semibold text-white hover:underline">

@@ -17,6 +17,8 @@ export type RankedCompetitorVisibility = {
   engine_count: number;
   citation_count: number;
   engines: string[];
+  /** Engines that cited this competitor (subset of scan engines). */
+  cited_engines?: string[];
   best_position?: number | null;
   matched_in_discovery: boolean;
   /** Listed by the user when the scan was created. */
@@ -28,6 +30,19 @@ export type RankedCompetitorVisibility = {
   engine_citations: EngineCitationHit[];
   /** URLs from each engine that match this competitor's domain. */
   citations_by_engine?: Record<string, EngineCitationHit[]>;
+  /** Best position per cited engine (API-computed). */
+  cited_engines_detail?: { engine: string; position: number | null }[];
+};
+
+export type TierBalanceMeta = {
+  same_tier_cited: number;
+  one_above_tier_cited: number;
+  same_tier_min: number;
+  one_above_tier_min: number;
+  same_tier_max: number;
+  one_above_tier_max: number;
+  tier_targets_met: boolean;
+  missing_tiers: string[];
 };
 
 export type CompetitorCitationVisibility = {
@@ -44,6 +59,11 @@ export type CompetitorCitationVisibility = {
   both_matched_count: number;
   discovery_only: RankedCompetitorVisibility[];
   other_cited_domains: RankedCompetitorVisibility[];
+  /** Full ranked pool (cited + uncited) for merging display when tier slots are sparse. */
+  all_ranked_competitors?: RankedCompetitorVisibility[];
   /** Per-prompt visibility when the scan has multiple prompts. */
   by_prompt?: CompetitorCitationVisibility[];
+  tier_balance?: TierBalanceMeta;
+  display_min_target?: number;
+  display_max_limit?: number;
 };

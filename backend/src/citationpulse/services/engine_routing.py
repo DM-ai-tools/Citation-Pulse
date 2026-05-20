@@ -45,6 +45,8 @@ def engine_route(engine: str, settings: Settings | None = None) -> EngineRoute:
             return "openai_direct"
         return "openrouter" if openrouter_configured(s) else "unconfigured"
     if engine in _ANTHROPIC_ENGINE:
+        if getattr(s, "claude_prefer_openrouter", False) and openrouter_configured(s):
+            return "openrouter"
         if anthropic_configured(s):
             return "anthropic_direct"
         return "openrouter" if openrouter_configured(s) else "unconfigured"

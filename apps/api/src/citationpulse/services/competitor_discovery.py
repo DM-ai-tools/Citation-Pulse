@@ -26,13 +26,19 @@ from citationpulse.services.llm_router import (
     chat_completion_sync,
     openrouter_configured,
 )
-from citationpulse.services.competitor_discovery_limits import (
-    ONE_LEVEL_ABOVE_COUNT,
-    SAME_LEVEL_COUNT,
-)
 from citationpulse.services.normalization import registrable_domain
 
 _log = logging.getLogger(__name__)
+
+# Initial discovery: 8–12 candidates (~50% same-tier, ~50% one-tier-above).
+SAME_LEVEL_COUNT = 6
+ONE_LEVEL_ABOVE_COUNT = 6
+INITIAL_CANDIDATE_TARGET = SAME_LEVEL_COUNT + ONE_LEVEL_ABOVE_COUNT
+
+# Expansion batch when tier-balanced cited minimums are not met.
+EXPANSION_SAME_LEVEL_BATCH = 4
+EXPANSION_ONE_LEVEL_ABOVE_BATCH = 4
+EXPANSION_BATCH_SIZE = EXPANSION_SAME_LEVEL_BATCH + EXPANSION_ONE_LEVEL_ABOVE_BATCH
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 
@@ -218,6 +224,9 @@ def _normalize_same_row(row: dict[str, Any], *, target_tier: int | None) -> Same
     tier_num = _parse_tier(str(row.get("tier") or ""))
     if target_tier is not None and tier_num is not None and abs(tier_num - target_tier) > 1:
         return None
+    # Trust same_level_competitors list when tier label missing or ambiguous.
+    if target_tier is not None and tier_num is None:
+        pass
     sim = float(row.get("similarity_score") or 0.5)
     sim = max(0.0, min(1.0, sim))
     strength = row.get("citation_strength_score")
@@ -251,6 +260,9 @@ def _normalize_above_row(row: dict[str, Any], *, target_tier: int | None) -> One
     if target_tier is not None and tier_num is not None:
         if tier_num <= target_tier or tier_num > target_tier + 2:
             return None
+    # Trust one_level_above_competitors list when tier label missing.
+    elif target_tier is not None and tier_num is None:
+        pass
     strength = row.get("citation_strength_score")
     cite_strength = (
         float(strength)
@@ -308,6 +320,8 @@ def _finalize_discovery(
     data: dict[str, Any],
     *,
     excluded: set[str],
+    same_level_cap: int = SAME_LEVEL_COUNT,
+    one_level_above_cap: int = ONE_LEVEL_ABOVE_COUNT,
 ) -> CompetitorDiscoveryResult:
     """Validate, prune, rank, and normalize model JSON for UI display."""
     target_raw = data.get("target_company")
@@ -322,7 +336,7 @@ def _finalize_discovery(
             parsed = _normalize_same_row(row, target_tier=target_tier)
             if parsed:
                 same.append(parsed)
-    same = _assign_ranks_same(same)[:SAME_LEVEL_COUNT]
+    same = _assign_ranks_same(same)[:same_level_cap]
 
     above: list[OneLevelAboveCompetitor] = []
     for row in data.get("one_level_above_competitors") or []:
@@ -330,16 +344,18 @@ def _finalize_discovery(
             parsed = _normalize_above_row(row, target_tier=target_tier)
             if parsed:
                 above.append(parsed)
-    above = _assign_ranks_above(above)[:ONE_LEVEL_ABOVE_COUNT]
+    above = _assign_ranks_above(above)[:one_level_above_cap]
 
     summary_raw = data.get("validation_summary")
     notes: list[str] = []
     if isinstance(summary_raw, dict) and summary_raw.get("notes"):
         notes.append(str(summary_raw["notes"]))
-    if len(same) < SAME_LEVEL_COUNT:
-        notes.append(f"Only {len(same)} same-level competitors passed validation.")
-    if len(above) < ONE_LEVEL_ABOVE_COUNT:
-        notes.append(f"Only {len(above)} one-level-above competitors passed validation.")
+    if len(same) < same_level_cap:
+        notes.append(f"Only {len(same)} same-level competitors passed validation (target {same_level_cap}).")
+    if len(above) < one_level_above_cap:
+        notes.append(
+            f"Only {len(above)} one-level-above competitors passed validation (target {one_level_above_cap})."
+        )
 
     summary = DiscoveryValidationSummary(
         same_level_validated=len(same),
@@ -361,6 +377,132 @@ def _finalize_discovery(
         validation_summary=summary,
     )
     return result
+
+
+def discovery_domains(result: CompetitorDiscoveryResult | dict[str, Any]) -> set[str]:
+    """Registrable domains from a discovery result (dict or model)."""
+    if isinstance(result, CompetitorDiscoveryResult):
+        rows = list(result.same_level_competitors) + list(result.one_level_above_competitors)
+        return {d for d in (_domain_key(r.domain) for r in rows) if d}
+    out: set[str] = set()
+    for key in ("same_level_competitors", "one_level_above_competitors"):
+        for row in result.get(key) or []:
+            if isinstance(row, dict):
+                dom = _domain_key(str(row.get("domain") or ""))
+                if dom:
+                    out.add(dom)
+    return out
+
+
+def merge_competitor_discovery(
+    base: dict[str, Any],
+    addon: CompetitorDiscoveryResult,
+) -> dict[str, Any]:
+    """Append expansion competitors to stored discovery JSON (dedupe by domain)."""
+    out = dict(base)
+    before = len(discovery_domains(out))
+    seen = discovery_domains(out)
+
+    def append_rows(key: str, rows: list[Any]) -> None:
+        current = list(out.get(key) or [])
+        for row in rows:
+            payload = row.model_dump(mode="json") if hasattr(row, "model_dump") else row
+            if not isinstance(payload, dict):
+                continue
+            dom = _domain_key(str(payload.get("domain") or ""))
+            if not dom or dom in seen:
+                continue
+            seen.add(dom)
+            current.append(payload)
+        out[key] = current
+
+    append_rows("same_level_competitors", list(addon.same_level_competitors))
+    append_rows("one_level_above_competitors", list(addon.one_level_above_competitors))
+    added = len(seen) - before
+    summary = out.get("validation_summary")
+    if isinstance(summary, dict) and added:
+        summary = dict(summary)
+        summary["notes"] = (
+            str(summary.get("notes") or "").strip() + f" Expansion added {added} competitors."
+        ).strip()
+        out["validation_summary"] = summary
+    return out
+
+
+def expand_competitors(
+    body: CompetitorAnalyzeRequest,
+    *,
+    existing_domains: set[str],
+    missing_tiers: list[str] | None = None,
+    settings: Settings | None = None,
+) -> CompetitorDiscoveryResult:
+    """Fetch additional competitors (web search) excluding domains already in the pool."""
+    from citationpulse.prompts.competitor_expansion import build_competitor_expansion_messages
+
+    s = settings or get_settings()
+    if not openrouter_configured(s):
+        raise CompetitorDiscoveryError("OPENROUTER_API_KEY is not configured for competitor expansion.")
+
+    target_domain = registrable_domain(body.target_website)
+    if not target_domain:
+        raise CompetitorDiscoveryError("Could not parse domain from target_website")
+
+    excluded = set(body.excluded_competitors) | existing_domains
+    if target_domain:
+        excluded.add(target_domain)
+
+    tiers = [t for t in (missing_tiers or []) if t in ("same_level", "one_level_above")]
+    need_same = not tiers or "same_level" in tiers
+    need_above = not tiers or "one_level_above" in tiers
+    same_cap = EXPANSION_SAME_LEVEL_BATCH if need_same else 0
+    above_cap = EXPANSION_ONE_LEVEL_ABOVE_BATCH if need_above else 0
+    if same_cap == 0 and above_cap == 0:
+        same_cap = EXPANSION_SAME_LEVEL_BATCH
+        above_cap = EXPANSION_ONE_LEVEL_ABOVE_BATCH
+
+    messages = build_competitor_expansion_messages(
+        target_website=body.target_website,
+        competitor_type=body.competitor_type,
+        service=body.service,
+        niche=body.niche,
+        location=body.location,
+        excluded_competitors=sorted(excluded),
+        market=body.market,
+        existing_domains=sorted(existing_domains),
+        missing_tiers=tiers or None,
+    )
+
+    model = s.competitor_discovery_model or s.chatgpt_model
+    try:
+        resp = chat_completion_sync(
+            model=model,
+            messages=messages,
+            max_tokens=s.competitor_discovery_max_tokens,
+            temperature=0.25,
+        )
+    except LLMConfigError as exc:
+        raise CompetitorDiscoveryError(str(exc)) from exc
+    except LLMProviderError as exc:
+        raise CompetitorDiscoveryError(f"LLM provider error: {exc}") from exc
+
+    try:
+        data = json.loads(_strip_json_payload(resp.text))
+    except json.JSONDecodeError as exc:
+        raise CompetitorDiscoveryError("Expansion model returned invalid JSON") from exc
+
+    if not isinstance(data, dict):
+        raise CompetitorDiscoveryError("Expansion JSON must be an object")
+
+    data = _filter_excluded(data, excluded)
+    try:
+        return _finalize_discovery(
+            data,
+            excluded=excluded,
+            same_level_cap=same_cap or EXPANSION_SAME_LEVEL_BATCH,
+            one_level_above_cap=above_cap or EXPANSION_ONE_LEVEL_ABOVE_BATCH,
+        )
+    except ValidationError as exc:
+        raise CompetitorDiscoveryError(f"Expansion JSON schema error: {exc}") from exc
 
 
 def _validate_counts(result: CompetitorDiscoveryResult) -> None:

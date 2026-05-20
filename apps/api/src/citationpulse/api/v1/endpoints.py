@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from citationpulse.api.deps import CurrentTenant, DbSession, get_auth_context
 from citationpulse.tasks.geo import fan_out_brand
-from citationpulse.models.domain import Alert, AlertRule, Brand, Citation, EngineRun, EngineType, Prompt
+from citationpulse.models.domain import Alert, AlertRule, Brand, Citation, EngineRun, EngineType, Opportunity, Prompt
 from citationpulse.schemas.brands import (
     AlertFeedItem,
     AlertRuleCreate,
@@ -18,6 +18,8 @@ from citationpulse.schemas.brands import (
     BrandRead,
     CitationRead,
     GapRead,
+    GapAnalysisRead,
+    OpportunityDetailRead,
     OpportunityRead,
     PromptBulkCreate,
     PromptRead,
@@ -321,6 +323,43 @@ def list_brand_opportunities(
             )
         )
     return out
+
+
+@router.get("/opportunities/{opportunity_id}/detail", response_model=OpportunityDetailRead)
+async def get_opportunity_detail_endpoint(
+    opportunity_id: UUID,
+    db: DbSession,
+    tenant: CurrentTenant,
+):
+    o = db.get(Opportunity, opportunity_id)
+    if not o:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    brand = db.get(Brand, o.brand_id)
+    if not brand or brand.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    from citationpulse.services.opportunity_detail import get_opportunity_detail
+
+    result = await get_opportunity_detail(db, opportunity_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    detail, source = result
+    return OpportunityDetailRead(id=opportunity_id, detail=detail, source=source)
+
+
+@router.get("/brands/{brand_id}/gaps-analysis", response_model=list[GapAnalysisRead])
+def list_brand_gaps_analysis(
+    brand_id: UUID,
+    db: DbSession,
+    tenant: CurrentTenant,
+):
+    b = db.get(Brand, brand_id)
+    if not b or b.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    from citationpulse.services.gap_analysis import list_gap_analysis_for_brand
+
+    rows = list_gap_analysis_for_brand(db, brand_id)
+    return [GapAnalysisRead.model_validate(row) for row in rows]
 
 
 @router.get("/brands/{brand_id}/engine-mix")

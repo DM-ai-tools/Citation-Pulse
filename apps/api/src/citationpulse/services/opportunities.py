@@ -301,6 +301,8 @@ def upsert_opportunity_row(
     )
     now = datetime.now(timezone.utc)
     if existing:
+        if existing.description != description or existing.gap_type != gap_type or existing.scope != scope_norm:
+            existing.detail_expansion = None
         existing.grade = grade
         existing.opportunity_score = opportunity_score_val
         existing.description = description
@@ -380,11 +382,7 @@ def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
     """
     from citationpulse.services.dataforseo_keywords import (
         DataForSEOError,
-        best_volume_for_candidates,
-        build_volume_map,
-        clean_service_keywords,
         dataforseo_configured,
-        extract_volume_keyword_candidates,
         fetch_google_ads_search_volumes,
     )
 
@@ -412,30 +410,20 @@ def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
         # language_code: first segment of locale (en-AU → en)
         language_code = loc_lower.split("-")[0] or "en"
 
-        prompt_candidates: dict[UUID, list[str]] = {}
-        keywords: list[str] = []
-        seen_kw: set[str] = set()
-        for p in locale_prompts:
-            cands = extract_volume_keyword_candidates(p.text)
-            prompt_candidates[p.id] = cands
-            for kw in clean_service_keywords(cands):
-                key = kw.lower()
-                if key not in seen_kw:
-                    seen_kw.add(key)
-                    keywords.append(kw)
+        # DataForSEO rejects question marks and certain punctuation — strip them.
+        # Also collapse extra whitespace after removal.
+        def _clean_keyword(text: str) -> str:
+            import re
+            cleaned = re.sub(r"[?!;:\"'()[\]{}<>@#$%^&*\\|~`]", " ", text[:700])
+            return " ".join(cleaned.split())
 
-        if not keywords:
-            continue
-
-        vol_map: dict[str, int] = {}
-
+        keywords = [_clean_keyword(p.text) for p in locale_prompts]
         try:
             rows = fetch_google_ads_search_volumes(
                 keywords,
                 location_code=location_code,
                 language_code=language_code,
             )
-            vol_map = build_volume_map(rows)
         except DataForSEOError as exc:
             _log.warning(
                 "sync_prompt_volumes DataForSEO error brand_id=%s locale=%s: %s",
@@ -443,14 +431,25 @@ def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
                 locale,
                 exc,
             )
+            continue
+
+        # Build keyword → volume lookup (case-insensitive)
+        vol_map: dict[str, int] = {}
+        for row in rows:
+            kw = (row.get("keyword") or "").strip().lower()
+            sv = row.get("search_volume")
+            if kw and isinstance(sv, (int, float)) and sv >= 0:
+                vol_map[kw] = int(sv)
 
         for p in locale_prompts:
-            volume = best_volume_for_candidates(
-                prompt_candidates.get(p.id, []),
-                vol_map,
-                location_code=location_code,
-                language_code=language_code,
-            )
+            kw_key = _clean_keyword(p.text).lower()
+            volume = vol_map.get(kw_key)
+            if volume is None:
+                # Fuzzy: try trimmed keyword
+                for k, v in vol_map.items():
+                    if kw_key.startswith(k[:40]) or k.startswith(kw_key[:40]):
+                        volume = v
+                        break
             if volume is None:
                 continue
             existing = db.get(PromptMetrics, p.id)

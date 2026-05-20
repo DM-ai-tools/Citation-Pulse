@@ -12,32 +12,20 @@ import {
 } from "recharts";
 import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import {
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-  createColumnHelper,
-} from "@tanstack/react-table";
+import Link from "next/link";
+import { Fragment, useId, type ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { Card, ErrorState, Skeleton } from "@/components/primitives";
 import { CitationHeatmap } from "@/components/report/CitationHeatmap";
-import { TopGapOpportunities } from "@/components/report/TopGapOpportunities";
 import { CompetitorRoster } from "@/components/report/CompetitorRoster";
 import { CompetitorDiscovery } from "@/components/report/CompetitorDiscovery";
 import { CompetitorEngineCitations } from "@/components/report/CompetitorEngineCitations";
 import { rosterFromReport } from "@/lib/competitorRoster";
-import { apiFetch } from "@/lib/api";
-import { DASHBOARD_LAST_SCAN_STORAGE_KEY } from "@/lib/dashboardScanPreference";
+import { useAuthApi } from "@/hooks/useAuthApi";
 import { engineTitle } from "@/lib/engineDisplay";
-import { getBrandOpportunities } from "@/services/brands";
-import { getScanReport } from "@/services/scans";
-import type { OpportunityRow, ReportData } from "@/types/report";
+import { useDashboardWorkspace } from "@/lib/useDashboardWorkspace";
+import type { ReportData } from "@/types/report";
 import type { MatrixCell } from "@/types/scan";
-
-type CitationRow = { id: string; url: string; domain: string; ownership: string };
-
-type BrandRow = { id: string; name: string; domains?: string[] };
 
 type BrandProfile = { id: string; name: string; domains: string[] };
 
@@ -55,16 +43,11 @@ type MatrixBundle = {
   matrix: { cells: MatrixCell[] };
 };
 
-type SoVResponse = { brand_share: number; range_days: number };
+/* Share of Voice KPI — disabled on dashboard per product UX (see DashboardShell). */
+// type SoVResponse = { brand_share: number; range_days: number };
 
 /** Optional: set in Docker/Railway build to show deploy revision on the dashboard (e.g. git SHA). */
 const APP_BUILD_LABEL = process.env.NEXT_PUBLIC_APP_VERSION?.trim() ?? "";
-
-/** Deploy-time override; otherwise the latest landing-page scan id from localStorage is used. */
-const SCAN_ID_FROM_ENV = process.env.NEXT_PUBLIC_DASHBOARD_SCAN_ID?.trim() ?? "";
-const BRAND_ID_ENV = process.env.NEXT_PUBLIC_DASHBOARD_BRAND_ID?.trim() ?? "";
-/** Match this site (e.g. firstpage.com.au or https://www.firstpage.com.au) to pick the brand when multiple exist */
-const SITE_URL_ENV = process.env.NEXT_PUBLIC_DASHBOARD_SITE_URL?.trim() ?? "";
 
 function urlHostFromSubmitted(submitted: string): string {
   return submitted.replace(/^https?:\/\//, "").split("/")[0] ?? "";
@@ -84,16 +67,6 @@ function normalizeSiteHost(raw: string): string {
       .split("/")[0]
       ?.toLowerCase() ?? "";
   }
-}
-
-function brandMatchesSiteUrl(b: BrandRow, siteRaw: string): boolean {
-  const want = normalizeSiteHost(siteRaw);
-  if (!want) return false;
-  if (normalizeSiteHost(b.name) === want) return true;
-  for (const d of b.domains ?? []) {
-    if (normalizeSiteHost(d) === want) return true;
-  }
-  return false;
 }
 
 function websiteFromBrand(name: string, domains: string[]): WebsiteSummary | null {
@@ -136,38 +109,6 @@ function websiteFromScanReport(data: ReportData): WebsiteSummary | null {
   };
 }
 
-function domainFromUrl(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url.slice(0, 80);
-  }
-}
-
-function citationsFromMatrixCells(cells: MatrixCell[]): CitationRow[] {
-  const rows: CitationRow[] = [];
-  let i = 0;
-  for (const cell of cells) {
-    for (const c of cell.citations ?? []) {
-      rows.push({
-        id: `${cell.promptId}-${cell.engine}-${i++}`,
-        url: c.url,
-        domain: domainFromUrl(c.url),
-        ownership: String(c.ownership),
-      });
-    }
-  }
-  return rows;
-}
-
-function totalCitationsInMatrix(cells: MatrixCell[]): number {
-  let n = 0;
-  for (const c of cells) {
-    n += c.citationsCount ?? (c.citations?.length ?? 0);
-  }
-  return n;
-}
-
 function engineMixFromMatrix(cells: MatrixCell[], engines: string[]): { engine: string; citations: number }[] {
   const counts = new Map<string, number>();
   for (const e of engines) counts.set(e, 0);
@@ -208,10 +149,8 @@ function SkeletonDashboard() {
   return (
     <div className="space-y-8">
       <Skeleton className="h-16 w-full max-w-xl rounded-xl" />
-      <div className="grid gap-4 md:grid-cols-2">
-        <Skeleton className="h-28" />
-        <Skeleton className="h-28" />
-      </div>
+      <Skeleton className="h-28 max-w-md" />
+      <Skeleton className="h-40 w-full rounded-xl" />
       <Skeleton className="h-[420px] w-full rounded-2xl" />
     </div>
   );
@@ -221,37 +160,16 @@ function DashboardShell(props: {
   brandDisplayName: string;
   website: WebsiteSummary | null;
   headerMeta: ReactNode;
-  sovPct: string;
-  sovFootnote: string;
-  citationTotal: number;
-  citationLabel: string;
-  citationFootnote: string;
   prompts: { id: string; text: string }[];
   engines: string[];
   cells: MatrixCell[];
   chartRows: { engine: string; citations: number }[];
   mixTitle: string;
   mixFootnote: string;
-  tableRows: CitationRow[];
-  /** Rendered after matrix / engine mix, before the citations URL table. */
-  beforeCitations?: ReactNode;
+  /** Optional blocks below matrix / engine mix (e.g. competitor discovery). */
+  belowMatrix?: ReactNode;
 }) {
   const barGradientId = useId().replace(/:/g, "");
-  const columns = useMemo(() => {
-    const ch = createColumnHelper<CitationRow>();
-    return [
-      ch.accessor("domain", { header: "Domain" }),
-      ch.accessor("url", { header: "URL", cell: (i) => String(i.getValue()).slice(0, 80) }),
-      ch.accessor("ownership", { header: "Owner" }),
-    ];
-  }, []);
-
-  const table = useReactTable({
-    data: props.tableRows,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
-
   const mixTotal = props.chartRows.reduce((s, r) => s + r.citations, 0);
 
   return (
@@ -296,19 +214,6 @@ function DashboardShell(props: {
           </div>
         ) : null}
         {props.headerMeta}
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="border-slate-100">
-          <p className="text-sm text-slate-500">Brand SoV (30d)</p>
-          <p className="mt-2 text-2xl font-bold text-ink-900">{props.sovPct}</p>
-          <p className="mt-1 text-xs text-slate-400">{props.sovFootnote}</p>
-        </Card>
-        <Card className="border-slate-100">
-          <p className="text-sm text-slate-500">{props.citationLabel}</p>
-          <p className="mt-2 text-2xl font-bold text-ink-900">{props.citationTotal}</p>
-          <p className="mt-1 text-xs text-slate-400">{props.citationFootnote}</p>
-        </Card>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8">
@@ -398,44 +303,7 @@ function DashboardShell(props: {
         </section>
       </div>
 
-      {props.beforeCitations}
-
-      <Card className="overflow-x-auto border-slate-100">
-        <h2 className="text-lg font-semibold text-ink-900">Citations</h2>
-        <p className="mt-1 text-sm text-slate-500">URLs surfaced from the matrix cells below.</p>
-        <table className="mt-4 w-full text-sm">
-          <thead>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id} className="border-b border-slate-100 text-left">
-                {hg.headers.map((h) => (
-                  <th key={h.id} className="p-2 font-semibold text-slate-600">
-                    {flexRender(h.column.columnDef.header, h.getContext())}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="p-4 text-slate-500">
-                  No citation URLs in the matrix yet.
-                </td>
-              </tr>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className="border-b border-slate-50">
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="p-2 text-ink-800">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </Card>
+      {props.belowMatrix ? <div className="max-w-6xl space-y-6">{props.belowMatrix}</div> : null}
     </div>
   );
 }
@@ -444,10 +312,7 @@ function ScanDashboard({ data, linkedFromLanding }: { data: ReportData; linkedFr
   const cells = data.matrix.cells ?? [];
   const engines = data.engines ?? [];
   const chartRows = engineMixFromMatrix(cells, engines);
-  const tableRows = citationsFromMatrixCells(cells);
   const roster = rosterFromReport(data);
-  const sovPct =
-    data.breakdown != null ? `${Math.round(data.breakdown.brand_share * 100)}%` : "—";
   const brandDisplayName = data.brand?.name ?? urlHostFromSubmitted(data.submitted_url);
   const website = websiteFromScanReport(data);
 
@@ -460,26 +325,21 @@ function ScanDashboard({ data, linkedFromLanding }: { data: ReportData; linkedFr
             <p className="mt-1 font-mono text-xs text-slate-400">Scan {data.scan_id}</p>
             {linkedFromLanding ? (
               <p className="mt-2 text-xs text-slate-600">
-                SoV and KPIs match your citation report for the site you submitted on the landing page. Run a new scan
-                there anytime to refresh this workspace view.
+                Matrix matches your citation report for the site you submitted on the landing page. Run a new scan there
+                anytime to refresh this workspace view. Open <strong className="font-semibold">Gaps</strong> in the sidebar
+                for opportunity analysis.
               </p>
             ) : null}
           </>
         }
-        sovPct={sovPct}
-        sovFootnote="Same 30-day breakdown as the citation report for this scan."
-        citationTotal={totalCitationsInMatrix(cells)}
-        citationLabel="Citations (this scan)"
-        citationFootnote="Citation rows attached to this scan’s matrix cells."
         prompts={data.prompts}
         engines={engines}
         cells={cells}
         chartRows={chartRows}
         mixTitle="Engine mix (this scan)"
         mixFootnote="Citations captured per engine from the matrix above"
-        tableRows={tableRows}
-        beforeCitations={
-          <div className="max-w-6xl space-y-6">
+        belowMatrix={
+          <>
             {(roster.userProvided.length > 0 || roster.analysis.length > 0) ? (
               <Card className="border-tr-line p-5">
                 <h2 className="font-display text-lg font-bold text-tr-navy">Tracked competitors</h2>
@@ -512,9 +372,12 @@ function ScanDashboard({ data, linkedFromLanding }: { data: ReportData; linkedFr
                 (data.competitor_discovery_status === "failed" ||
                   data.competitor_discovery_status === "skipped")
               }
+              discoveryValidatedCount={
+                (data.competitor_discovery?.validation_summary?.same_level_validated ?? 0) +
+                (data.competitor_discovery?.validation_summary?.one_level_above_validated ?? 0)
+              }
             />
-            <TopGapOpportunities opportunities={data.opportunities ?? []} />
-          </div>
+          </>
         }
       />
   );
@@ -524,15 +387,10 @@ function BrandDashboard(props: {
   brandName: string;
   website: WebsiteSummary | null;
   matrix: MatrixBundle;
-  sov: SoVResponse | null;
-  opportunities: OpportunityRow[];
 }) {
   const cells = props.matrix.matrix.cells ?? [];
   const engines = props.matrix.engines ?? [];
   const chartRows = engineMixFromMatrix(cells, engines);
-  const tableRows = citationsFromMatrixCells(cells);
-  const sovPct =
-    props.sov != null ? `${Math.round((props.sov.brand_share ?? 0) * 100)}%` : "—";
 
   return (
     <Fragment>
@@ -542,14 +400,11 @@ function BrandDashboard(props: {
         headerMeta={
           <div className="space-y-3">
             <div className="rounded-lg border border-amber-200/90 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
-              <strong className="font-semibold">Workspace view:</strong> SoV and the matrix use this brand&apos;s
-              30‑day runs. <strong className="font-semibold">Top gap opportunities</strong> (above the citations table)
-              load from the same saved detection data as the API (<code className="rounded bg-white/80 px-1 font-mono text-[11px]">
-                GET /brands/…/opportunities
-              </code>
-              ), not from a funnel scan id. Run a free scan from the home page to store a last scan in this browser, or
-              set <code className="font-mono text-[11px]">NEXT_PUBLIC_DASHBOARD_SCAN_ID</code> on the web host to pin
-              the live report view.
+              <strong className="font-semibold">Workspace view:</strong> The citation matrix uses this brand&apos;s
+              30‑day runs. Open <strong className="font-semibold">Gaps</strong> in the sidebar for full analysis. Run
+              a free scan from the home page to store a last scan in this browser, or set{" "}
+              <code className="font-mono text-[11px]">NEXT_PUBLIC_DASHBOARD_SCAN_ID</code> on the web host to pin the
+              live report view.
             </div>
             <p className="text-xs text-slate-500">
               When multiple brands exist, optionally set{" "}
@@ -558,23 +413,12 @@ function BrandDashboard(props: {
             </p>
           </div>
         }
-        sovPct={sovPct}
-        sovFootnote={`Share of brand-owned citations from finished runs in the last ${props.sov?.range_days ?? 30} days.`}
-        citationTotal={totalCitationsInMatrix(cells)}
-        citationLabel="Citations (matrix)"
-        citationFootnote="Total citation rows in the 30-day prompt × engine matrix."
         prompts={props.matrix.prompts}
         engines={engines}
         cells={cells}
         chartRows={chartRows}
         mixTitle="Engine mix (matrix)"
         mixFootnote="Citations captured per engine from the matrix above"
-        tableRows={tableRows}
-        beforeCitations={
-          <div className="max-w-6xl">
-            <TopGapOpportunities opportunities={props.opportunities} />
-          </div>
-        }
       />
       <DeployFootnote />
     </Fragment>
@@ -582,141 +426,75 @@ function BrandDashboard(props: {
 }
 
 export default function DashboardPage() {
-  const [storedScanId, setStoredScanId] = useState("");
-  const [scanPrefReady, setScanPrefReady] = useState(false);
-
-  useEffect(() => {
-    if (SCAN_ID_FROM_ENV) {
-      setScanPrefReady(true);
-      return;
-    }
-    try {
-      setStoredScanId(localStorage.getItem(DASHBOARD_LAST_SCAN_STORAGE_KEY)?.trim() ?? "");
-    } catch {
-      setStoredScanId("");
-    }
-    setScanPrefReady(true);
-  }, []);
-
-  const effectiveScanId = SCAN_ID_FROM_ENV || storedScanId;
-  const useScanReport = Boolean(effectiveScanId);
-
-  const brands = useQuery({
-    queryKey: ["brands"],
-    queryFn: async (): Promise<BrandRow[]> => {
-      const r = await apiFetch("/api/v1/brands");
-      if (!r.ok) throw new Error(await r.text());
-      return r.json();
-    },
-    enabled: scanPrefReady && !useScanReport,
-  });
-
-  const effectiveBrandId = useMemo(() => {
-    if (useScanReport) return "";
-    if (BRAND_ID_ENV) return BRAND_ID_ENV;
-    const list = brands.data ?? [];
-    if (SITE_URL_ENV && list.length > 0) {
-      const hit = list.find((b) => brandMatchesSiteUrl(b, SITE_URL_ENV));
-      if (hit) return hit.id;
-    }
-    return list[0]?.id ?? "";
-  }, [brands.data, useScanReport]);
-
-  const report = useQuery({
-    queryKey: ["dashboard-scan-report", effectiveScanId],
-    queryFn: () => getScanReport(effectiveScanId),
-    enabled: scanPrefReady && useScanReport,
-  });
+  const authApi = useAuthApi();
+  const ws = useDashboardWorkspace();
 
   const brandProfile = useQuery({
-    queryKey: ["brand-profile", effectiveBrandId],
+    queryKey: ["brand-profile", ws.brandId],
     queryFn: async (): Promise<BrandProfile> => {
-      const r = await apiFetch(`/api/v1/brands/${effectiveBrandId}`);
+      const r = await authApi(`/api/v1/brands/${ws.brandId}`);
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    enabled: scanPrefReady && !useScanReport && !!effectiveBrandId,
-  });
-
-  const sov = useQuery({
-    queryKey: ["sov", effectiveBrandId],
-    queryFn: async (): Promise<SoVResponse | null> => {
-      const r = await apiFetch(`/api/v1/brands/${effectiveBrandId}/sov?range=30d`);
-      if (!r.ok) throw new Error(await r.text());
-      return r.json();
-    },
-    enabled: scanPrefReady && !useScanReport && !!effectiveBrandId,
+    enabled: !ws.useScanReport && Boolean(ws.brandId),
   });
 
   const matrix = useQuery({
-    queryKey: ["matrix", effectiveBrandId],
+    queryKey: ["matrix", ws.brandId],
     queryFn: async (): Promise<MatrixBundle | null> => {
-      const r = await apiFetch(`/api/v1/brands/${effectiveBrandId}/matrix?range=30d`);
+      const r = await authApi(`/api/v1/brands/${ws.brandId}/matrix?range=30d`);
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    enabled: scanPrefReady && !useScanReport && !!effectiveBrandId,
+    enabled: !ws.useScanReport && Boolean(ws.brandId),
   });
 
-  const brandOpportunities = useQuery({
-    queryKey: ["brand-opportunities", effectiveBrandId],
-    queryFn: () => getBrandOpportunities(effectiveBrandId),
-    enabled: scanPrefReady && !useScanReport && !!effectiveBrandId,
-    retry: 1,
-  });
+  if (ws.isLoading) return <SkeletonDashboard />;
 
-  /* ---------- Scan mode (env or latest landing scan) ---------- */
-  if (!scanPrefReady) {
-    return <SkeletonDashboard />;
-  }
-
-  if (useScanReport) {
-    if (report.isPending) return <SkeletonDashboard />;
-    if (report.isError || !report.data) {
-      return (
-        <ErrorState
-          message="Could not load this scan report. Run a free scan from the landing page, or set NEXT_PUBLIC_DASHBOARD_SCAN_ID. Ensure you are signed in to the same workspace."
-          onRetry={() => report.refetch()}
-        />
-      );
-    }
+  if (ws.useScanReport && ws.report) {
     return (
       <div>
-        <ScanDashboard data={report.data} linkedFromLanding={!SCAN_ID_FROM_ENV && Boolean(storedScanId)} />
+        <ScanDashboard data={ws.report} linkedFromLanding={ws.linkedFromLanding} />
         <DeployFootnote />
       </div>
     );
   }
 
-  /* ---------- Brand mode (default) ---------- */
-  if (brands.isPending) return <SkeletonDashboard />;
-  if (brands.isError) {
+  if (ws.isError) {
     return (
-      <ErrorState message="Could not load brands — check NEXT_PUBLIC_API_URL and that the API is running." onRetry={() => brands.refetch()} />
+      <ErrorState
+        message="Could not load your latest scan report. Run a free scan from the landing page, then return here."
+        onRetry={ws.refetch}
+      />
     );
   }
-  if (!brands.data?.length) {
+
+  if (!ws.tenantBrands.length) {
     return (
       <Card className="border-slate-100 p-6 text-sm text-slate-700">
-        <p className="font-semibold text-ink-900">No brands yet</p>
+        <p className="font-semibold text-ink-900">No scan data yet</p>
         <p className="mt-2 text-slate-600">
-          Create a brand with <code className="rounded bg-slate-100 px-1 font-mono text-xs">POST /api/v1/brands</code>{" "}
-          to populate this dashboard.
+          Run a citation scan on the landing page. Your latest report will appear here automatically after you sign in.
         </p>
+        <Link
+          href="/landing"
+          className="mt-4 inline-block text-sm font-semibold text-brand-primary hover:underline"
+        >
+          Run a scan →
+        </Link>
       </Card>
     );
   }
 
-  if (!effectiveBrandId) return <SkeletonDashboard />;
+  if (!ws.brandId) return <SkeletonDashboard />;
 
-  const brandKpisLoading = brandProfile.isPending || sov.isPending || matrix.isPending;
+  const brandKpisLoading = brandProfile.isPending || matrix.isPending;
 
   if (brandKpisLoading) return <SkeletonDashboard />;
 
-  if (brandProfile.isError || sov.isError || matrix.isError || !matrix.data) {
+  if (brandProfile.isError || matrix.isError || !matrix.data) {
     const retry = () => {
       void brandProfile.refetch();
-      void sov.refetch();
       void matrix.refetch();
     };
     return (
@@ -727,18 +505,11 @@ export default function DashboardPage() {
     );
   }
 
-  const brandName = brandProfile.data?.name ?? "Brand";
+  const brandName = brandProfile.data?.name ?? ws.brandName;
   const websiteSummary = websiteFromBrand(brandName, brandProfile.data?.domains ?? []);
-  const opportunityRows: OpportunityRow[] = brandOpportunities.data ?? [];
 
   return (
-    <BrandDashboard
-      brandName={brandName}
-      website={websiteSummary}
-      matrix={matrix.data}
-      sov={sov.data}
-      opportunities={opportunityRows}
-    />
+    <BrandDashboard brandName={brandName} website={websiteSummary} matrix={matrix.data} />
   );
 }
 

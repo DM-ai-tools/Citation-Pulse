@@ -70,7 +70,7 @@ Once Postgres is running, `.env` is configured, and migrations are applied:
 | Celery worker  | `celery -A citationpulse.celery_app worker -l info --pool=solo` (from `apps/api`)                        | —                                              |
 | Next.js (web)  | `npm run dev` (from repo root, or `npm run dev -w citationpulse-web`)                                    | http://localhost:3000                          |
 
-The root `npm run dev` starts **only** the Next.js app on `:3000`. The browser still calls the API at `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`), so you must run FastAPI separately—or on **Windows**, use **`npm run dev:stack`** to start web + API together (second terminal is still needed for Celery: `scripts\\start-worker.ps1`). Full setup: `docs/SETUP_WINDOWS.md`.
+On **Windows**, the root **`npm run dev`** runs the full stack via `scripts/start-all.ps1` (web + API + worker). For web-only: **`npm run dev:web`**. Full setup: `docs/SETUP_WINDOWS.md` and production deploy: `infra/railway/README.md`.
 
 ## Environment
 

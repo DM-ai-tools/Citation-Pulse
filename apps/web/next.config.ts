@@ -3,9 +3,15 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   devIndicators: false,
-  /** Browser → ``/api/v1/*`` on the web host → FastAPI (set ``API_PROXY_TARGET`` at Web build time). */
+  /** Browser → ``/api/v1/*`` on the web host → FastAPI (avoids CORS in local dev). */
   async rewrites() {
-    const target = (process.env.API_PROXY_TARGET || "").trim().replace(/\/+$/, "");
+    const devPort = process.env.DEV_API_PORT || "8000";
+    const target = (
+      process.env.API_PROXY_TARGET ||
+      (process.env.NODE_ENV === "development" ? `http://127.0.0.1:${devPort}` : "")
+    )
+      .trim()
+      .replace(/\/+$/, "");
     if (!target) return [];
     return [{ source: "/api/v1/:path*", destination: `${target}/api/v1/:path*` }];
   },
