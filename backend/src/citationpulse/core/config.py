@@ -150,6 +150,9 @@ class Settings(BaseSettings):
 
     # Gap / scoring
     gap_absence_run_threshold: int = 3
+    # Scan execution controls for fan-out workers.
+    scan_parallel_engines: bool = True
+    scan_parallel_max_concurrent: int = 4
 
     # Anonymous POST /api/v1/scans — per resolved client IP per hour. Railway needs
     # correct X-Forwarded-For handling (see Dockerfile / FORWARDED_ALLOW_IPS). Set
