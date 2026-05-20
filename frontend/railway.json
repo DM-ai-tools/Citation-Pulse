@@ -6,7 +6,7 @@
   },
   "deploy": {
     "startCommand": "npm run start -- --port $PORT",
-    "healthcheckPath": "/",
+    "healthcheckPath": "/login",
     "restartPolicyType": "ON_FAILURE"
   }
 }
