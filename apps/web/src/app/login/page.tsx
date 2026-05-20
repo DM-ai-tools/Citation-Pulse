@@ -1,9 +1,11 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { redirectAfterAuth } from "@/lib/authRedirect";
+import { normalizeAuthUser } from "@/lib/authSession";
 import { AuthField } from "@/components/auth/AuthField";
 import { AuthFooterLink, AuthShell } from "@/components/auth/AuthShell";
 import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
@@ -12,6 +14,7 @@ import { setAuthSession } from "@/lib/authSession";
 import { login } from "@/services/auth";
 
 export default function LoginPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { setSession } = useAuth();
   const [email, setEmail] = useState("");
@@ -26,11 +29,12 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await login({ email: email.trim().toLowerCase(), password, remember });
-      setAuthSession(res.access_token, res.user, remember);
-      setSession(res.access_token, res.user);
+      const user = normalizeAuthUser(res.user);
+      setAuthSession(res.access_token, user, remember);
+      setSession(res.access_token, user);
       await queryClient.invalidateQueries();
       toast.success("Welcome back");
-      redirectAfterAuth("/landing");
+      router.push(redirectAfterAuth("/landing"));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Login failed";
       setError(msg);

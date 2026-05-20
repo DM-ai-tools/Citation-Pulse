@@ -9,7 +9,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { clearAuthSession, getStoredToken, getStoredUser, type AuthUser } from "@/lib/authSession";
+import {
+  clearAuthSession,
+  getStoredToken,
+  getStoredUser,
+  normalizeAuthUser,
+  setAuthSession,
+  type AuthUser,
+} from "@/lib/authSession";
 import { fetchMe } from "@/services/auth";
 
 const BYPASS_AUTH = (process.env.NEXT_PUBLIC_AUTH_BYPASS || "").toLowerCase() === "true";
@@ -44,11 +51,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     fetchMe(t)
-      .then((fresh) => setUser(fresh))
-      .catch(() => {
-        clearAuthSession();
-        setToken(null);
-        setUser(null);
+      .then((fresh) => {
+        setUser(fresh);
+        setAuthSession(t, fresh, true);
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg === "Session expired") {
+          clearAuthSession();
+          setToken(null);
+          setUser(null);
+        }
+        // Network/proxy errors: keep stored session so login → landing is not bounced.
       })
       .finally(() => setLoading(false));
   }, []);

@@ -87,6 +87,8 @@ export type ApiClientOptions = RequestInit & {
   getToken?: () => Promise<string | null>;
   /** When false, never attach Authorization (public funnel endpoints). Default true in browser. */
   auth?: boolean;
+  /** When false, 401 does not clear storage or redirect (e.g. session probe on boot). Default true. */
+  clearSessionOn401?: boolean;
 };
 
 function redirectToLogin() {
@@ -98,7 +100,7 @@ function redirectToLogin() {
 }
 
 export async function apiClient(path: string, init: ApiClientOptions = {}) {
-  const { getToken, auth = true, ...rest } = init;
+  const { getToken, auth = true, clearSessionOn401 = true, ...rest } = init;
   const headers = new Headers(rest.headers);
   if (!headers.has("Content-Type") && rest.body && typeof rest.body === "string") {
     headers.set("Content-Type", "application/json");
@@ -112,7 +114,13 @@ export async function apiClient(path: string, init: ApiClientOptions = {}) {
     }
   }
   const r = await fetch(`${base()}${path}`, { ...rest, headers, credentials: "include" });
-  if (auth && r.status === 401 && !BYPASS_AUTH && typeof window !== "undefined") {
+  if (
+    auth &&
+    clearSessionOn401 &&
+    r.status === 401 &&
+    !BYPASS_AUTH &&
+    typeof window !== "undefined"
+  ) {
     const { clearAuthSession } = await import("@/lib/authSession");
     clearAuthSession();
     redirectToLogin();

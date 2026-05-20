@@ -1,5 +1,5 @@
 import { apiClient } from "@/services/apiClient";
-import type { AuthUser } from "@/lib/authSession";
+import { normalizeAuthUser, type AuthUser } from "@/lib/authSession";
 
 export type AuthResponse = {
   access_token: string;
@@ -113,9 +113,13 @@ export async function logout() {
 
 export async function fetchMe(token: string) {
   if (BYPASS_AUTH) {
-    return fallbackAuthResponse({ role: "user" }).user;
+    return normalizeAuthUser(fallbackAuthResponse({ role: "user" }).user);
   }
-  const r = await apiClient("/api/v1/auth/me", { getToken: async () => token });
-  if (!r.ok) throw new Error("Session expired");
-  return (await r.json()) as AuthUser;
+  const r = await apiClient("/api/v1/auth/me", {
+    getToken: async () => token,
+    clearSessionOn401: false,
+  });
+  if (r.status === 401) throw new Error("Session expired");
+  if (!r.ok) throw new Error("Could not verify session");
+  return normalizeAuthUser((await r.json()) as AuthUser);
 }

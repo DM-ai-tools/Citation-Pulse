@@ -1,10 +1,15 @@
-/** Full navigation after auth so cookies are applied before the next route loads. */
-export function redirectAfterAuth(path?: string) {
-  if (typeof window === "undefined") return;
+/** Post-login destination (honours ``?next=`` when safe). */
+export function postAuthPath(fallback = "/landing"): string {
+  if (typeof window === "undefined") return fallback;
   const params = new URLSearchParams(window.location.search);
   const next = params.get("next");
-  const target =
-    path ??
-    (next && next.startsWith("/") && next !== "/login" && next !== "/signup" ? next : "/landing");
-  window.location.assign(target);
+  if (next && next.startsWith("/") && next !== "/login" && next !== "/signup") {
+    return next;
+  }
+  return fallback;
+}
+
+/** Client navigation after auth (keeps React session; prefer over full reload). */
+export function redirectAfterAuth(path?: string) {
+  return postAuthPath(path ?? "/landing");
 }
