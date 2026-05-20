@@ -16,6 +16,7 @@ export async function signup(payload: {
 }) {
   const r = await apiClient("/api/v1/auth/signup", {
     method: "POST",
+    auth: false,
     body: JSON.stringify(payload),
   });
   if (!r.ok) {
@@ -45,6 +46,7 @@ export async function signup(payload: {
 export async function login(payload: { email: string; password: string; remember?: boolean }) {
   const r = await apiClient("/api/v1/auth/login", {
     method: "POST",
+    auth: false,
     body: JSON.stringify(payload),
   });
   if (!r.ok) {
@@ -62,6 +64,7 @@ export async function login(payload: { email: string; password: string; remember
 export async function adminLogin(payload: { username: string; password: string }) {
   const r = await apiClient("/api/v1/auth/admin/login", {
     method: "POST",
+    auth: false,
     body: JSON.stringify(payload),
   });
   if (!r.ok) {
