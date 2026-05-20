@@ -1,4 +1,4 @@
-import { DEV_BYPASS_USER, isAuthBypass } from "@/lib/authBypass";
+import { DEV_BYPASS_USER, PUBLIC_GUEST_USER, isAuthBypass, isDevOnlyBypass } from "@/lib/authBypass";
 import { normalizeAuthUser, type AuthUser } from "@/lib/authSession";
 import { apiClient } from "@/services/apiClient";
 
@@ -112,7 +112,7 @@ export async function logout() {
 
 export async function fetchMe(token: string) {
   if (isAuthBypass()) {
-    return normalizeAuthUser(DEV_BYPASS_USER);
+    return normalizeAuthUser(isDevOnlyBypass() ? DEV_BYPASS_USER : PUBLIC_GUEST_USER);
   }
   const r = await apiClient("/api/v1/auth/me", {
     getToken: async () => token,

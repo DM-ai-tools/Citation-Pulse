@@ -1,6 +1,7 @@
 const TOKEN_KEY = "cp_access_token";
 const USER_KEY = "cp_user";
 const FRESH_LOGIN_KEY = "cp_fresh_login";
+const DEV_SIGNED_OUT_KEY = "cp_dev_signed_out";
 
 export type AuthUser = {
   id: string;
@@ -76,4 +77,22 @@ export function clearAuthSession() {
   clearFreshLogin();
   document.cookie = "cp_token=; path=/; max-age=0";
   document.cookie = "cp_role=; path=/; max-age=0";
+}
+
+/** Local dev bypass: user clicked sign out — skip auto dev session until next login. */
+export function markDevBypassSignedOut() {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(DEV_SIGNED_OUT_KEY, "1");
+  document.cookie = "cp_dev_signed_out=1; path=/; max-age=86400; SameSite=Lax";
+}
+
+export function isDevBypassSignedOut(): boolean {
+  if (typeof window === "undefined") return false;
+  return sessionStorage.getItem(DEV_SIGNED_OUT_KEY) === "1";
+}
+
+export function clearDevBypassSignedOut() {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(DEV_SIGNED_OUT_KEY);
+  document.cookie = "cp_dev_signed_out=; path=/; max-age=0";
 }

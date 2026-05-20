@@ -24,13 +24,15 @@ export default function AdminUserDetailPage() {
   }
 
   if (detail.isError || !detail.data) {
+    const errMsg =
+      detail.error instanceof Error ? detail.error.message : "Could not load this user's scans.";
     return (
       <div className="space-y-4">
         <Link href="/admin/users" className="inline-flex items-center gap-1 text-sm font-semibold text-brand-primary hover:underline">
           <ArrowLeft className="h-4 w-4" />
           Back to users
         </Link>
-        <p className="text-red-700">Could not load this user&apos;s scans.</p>
+        <p className="text-red-700">{errMsg}</p>
       </div>
     );
   }

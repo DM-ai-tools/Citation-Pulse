@@ -2,8 +2,10 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { isAuthBypass, isDevOnlyBypass } from "@/lib/authBypass";
+import { isDevBypassSignedOut } from "@/lib/authSession";
 import { redirectAfterAuth } from "@/lib/authRedirect";
 import { markFreshLogin, normalizeAuthUser, setAuthSession } from "@/lib/authSession";
 import { AuthField } from "@/components/auth/AuthField";
@@ -16,6 +18,12 @@ import { signup } from "@/services/auth";
 export default function SignupPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (isAuthBypass() && (!isDevOnlyBypass() || !isDevBypassSignedOut())) {
+      router.replace("/landing");
+    }
+  }, [router]);
   const { setSession } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

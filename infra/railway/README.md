@@ -63,7 +63,8 @@ Set these in Railway (shared variables are fine):
 - `OPENROUTER_API_KEY` -> required for scans (set on **both** API and worker if you use a separate worker; missing key yields OpenRouter HTTP 401). After deploy, open `GET /health` on the API: `openrouter_configured` must be `true` (no quotes or stray spaces in the variable value).
 - `ENVIRONMENT=production`
 - `LOG_LEVEL=info`
-- `AUTH_JWT_SECRET` -> **required** (32+ random chars; weak defaults block API startup in production)
+- **Public landing (no login):** `PUBLIC_ACCESS_MODE=true` and `AUTH_DISABLE_JWT=true` on API; Web Docker build sets `NEXT_PUBLIC_SKIP_AUTH=true` (visitors go to `/landing`, `/login` and `/signup` redirect there).
+- **Authenticated production:** omit those flags and set `AUTH_JWT_SECRET` -> **required** (32+ random chars)
 - `AUTH_ADMIN_EMAIL` / `AUTH_ADMIN_PASSWORD` / `AUTH_ADMIN_NAME` -> seed the first admin (optional if admin already exists)
 
 Set these at minimum on API:

@@ -86,14 +86,16 @@ export type ApiClientOptions = RequestInit & {
 
 export async function apiClient(path: string, init: ApiClientOptions = {}) {
   const bypass = isAuthBypass();
-  const { getToken, auth = !bypass, clearSessionOn401 = !bypass, ...rest } = init;
+  const { getToken, clearSessionOn401 = !bypass, ...rest } = init;
+  const stored = getToken ? await getToken() : storedAccessToken();
+  // In bypass mode still send JWT when present (e.g. after admin login).
+  const auth = init.auth ?? (!bypass || Boolean(stored));
   const headers = new Headers(rest.headers);
   if (!headers.has("Content-Type") && rest.body && typeof rest.body === "string") {
     headers.set("Content-Type", "application/json");
   }
   if (auth && !headers.has("Authorization")) {
-    const t = getToken ? await getToken() : storedAccessToken();
-    if (t) headers.set("Authorization", `Bearer ${t}`);
+    if (stored) headers.set("Authorization", `Bearer ${stored}`);
     else if (!bypass && typeof window !== "undefined") {
       throw new Error("Sign in required");
     }

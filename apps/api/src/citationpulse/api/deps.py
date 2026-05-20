@@ -64,12 +64,12 @@ def _authenticate_local_bearer(db: Session, token: str) -> dict[str, Any] | None
 
 
 def _open_dev_access(settings: Settings) -> bool:
-    """Phase-1 local access without JWT (see AUTH_DISABLE_JWT)."""
+    """Phase-1 access without JWT (local dev or production public landing)."""
+    if settings.auth_disable_jwt or settings.public_access_mode:
+        return True
     env = settings.environment.lower()
     if env not in ("development", "dev", "local"):
         return False
-    if settings.auth_disable_jwt:
-        return True
     return (
         settings.internal_phase1
         and not (settings.clerk_jwks_url or "").strip()

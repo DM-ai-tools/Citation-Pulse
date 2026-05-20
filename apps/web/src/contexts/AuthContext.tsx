@@ -9,11 +9,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { DEV_BYPASS_USER, isAuthBypass } from "@/lib/authBypass";
+import { DEV_BYPASS_USER, PUBLIC_GUEST_USER, isAuthBypass, isDevOnlyBypass } from "@/lib/authBypass";
 import {
   clearAuthSession,
+  clearDevBypassSignedOut,
   getStoredToken,
   getStoredUser,
+  isDevBypassSignedOut,
+  markDevBypassSignedOut,
   normalizeAuthUser,
   setAuthSession,
   type AuthUser,
@@ -37,10 +40,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isAuthBypass()) {
-      const devUser = normalizeAuthUser(DEV_BYPASS_USER);
-      setToken("dev-local");
-      setUser(devUser);
-      setAuthSession("dev-local", devUser, true);
+      if (!isDevOnlyBypass() || !isDevBypassSignedOut()) {
+        const t = getStoredToken();
+        const u = getStoredUser();
+        if (t && u) {
+          setToken(t);
+          setUser(u);
+        } else {
+          const guest = normalizeAuthUser(isDevOnlyBypass() ? DEV_BYPASS_USER : PUBLIC_GUEST_USER);
+          const guestToken = isDevOnlyBypass() ? "dev-local" : "guest";
+          setToken(guestToken);
+          setUser(guest);
+          setAuthSession(guestToken, guest, true);
+        }
+      }
       setLoading(false);
       return;
     }
@@ -54,16 +67,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setSession = useCallback((t: string, u: AuthUser) => {
+    clearDevBypassSignedOut();
     setToken(t);
     setUser(normalizeAuthUser(u));
   }, []);
 
   const signOut = useCallback(() => {
+    if (isDevOnlyBypass()) {
+      clearAuthSession();
+      markDevBypassSignedOut();
+      setToken(null);
+      setUser(null);
+      return;
+    }
     if (isAuthBypass()) {
-      const devUser = normalizeAuthUser(DEV_BYPASS_USER);
-      setAuthSession("dev-local", devUser, true);
-      setToken("dev-local");
-      setUser(devUser);
+      clearAuthSession();
+      setToken(null);
+      setUser(null);
       return;
     }
     clearAuthSession();

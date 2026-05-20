@@ -59,7 +59,17 @@ export async function fetchAdminUserScans(
   api: (path: string, init?: ApiClientOptions) => Promise<Response>,
   userId: string,
 ) {
-  const r = await api(`/api/v1/admin/users/${userId}/scans`);
-  if (!r.ok) throw new Error(await r.text());
+  const r = await api(`/api/v1/admin/users/${encodeURIComponent(userId)}/scans`);
+  if (!r.ok) {
+    let msg = `Could not load scans (${r.status})`;
+    try {
+      const body = await r.json();
+      if (typeof body.detail === "string") msg = body.detail;
+    } catch {
+      const text = await r.text().catch(() => "");
+      if (text) msg = text.slice(0, 200);
+    }
+    throw new Error(msg);
+  }
   return (await r.json()) as AdminUserScansResponse;
 }

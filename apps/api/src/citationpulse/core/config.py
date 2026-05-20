@@ -48,8 +48,9 @@ class Settings(BaseSettings):
     clerk_audience: str = ""
     internal_phase1: bool = True
     internal_api_key: str = ""
-    # Local dev: allow API routes without JWT (never enable in production).
+    # Open API without JWT (local dev or production public landing — set PUBLIC_ACCESS_MODE=true).
     auth_disable_jwt: bool = False
+    public_access_mode: bool = False
 
     # Native email/password auth (Citation Pulse accounts)
     auth_jwt_secret: str = "change-me-set-AUTH_JWT_SECRET-in-production"
@@ -210,8 +211,13 @@ def validate_production_settings(s: Settings | None = None) -> None:
     s = s or get_settings()
     if s.environment.lower() != "production":
         return
-    if s.auth_disable_jwt:
-        raise RuntimeError("AUTH_DISABLE_JWT must not be enabled when ENVIRONMENT=production")
+    if s.public_access_mode or s.auth_disable_jwt:
+        _log = __import__("logging").getLogger(__name__)
+        _log.warning(
+            "Production public access mode: login disabled on web; API accepts open Phase-1 access. "
+            "Do not use for sensitive data without other protections."
+        )
+        return
     secret = (s.auth_jwt_secret or "").strip()
     if secret in _WEAK_JWT_SECRETS or len(secret) < 32:
         raise RuntimeError(

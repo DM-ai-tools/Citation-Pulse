@@ -4,7 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { isAuthBypass } from "@/lib/authBypass";
+import { isAuthBypass, isDevOnlyBypass } from "@/lib/authBypass";
+import { isDevBypassSignedOut } from "@/lib/authSession";
 import { redirectAfterAuth } from "@/lib/authRedirect";
 import { markFreshLogin, normalizeAuthUser, setAuthSession } from "@/lib/authSession";
 import { AuthField } from "@/components/auth/AuthField";
@@ -24,7 +25,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isAuthBypass()) {
+    if (isAuthBypass() && (!isDevOnlyBypass() || !isDevBypassSignedOut())) {
       router.replace("/landing");
     }
   }, [router]);
