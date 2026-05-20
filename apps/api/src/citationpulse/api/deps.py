@@ -103,15 +103,30 @@ def get_auth_context(
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
 
+def _ensure_user_tenant(db: Session, user: User) -> Tenant:
+    """Attach a workspace tenant when missing (e.g. seeded admin accounts)."""
+    if user.tenant_id:
+        existing = db.get(Tenant, user.tenant_id)
+        if existing:
+            return existing
+    label = (user.name or user.email or "Workspace").strip() or "Workspace"
+    tenant = Tenant(name=f"{label}'s workspace", plan="saas")
+    db.add(tenant)
+    db.flush()
+    user.tenant_id = tenant.id
+    db.commit()
+    db.refresh(tenant)
+    db.refresh(user)
+    return tenant
+
+
 def resolve_tenant(db: Session, claims: dict[str, Any]) -> Tenant:
     if claims.get("mode") == "local":
         user_id = claims.get("user_id")
         if user_id:
             user = db.get(User, user_id) if isinstance(user_id, UUID) else db.get(User, UUID(str(user_id)))
-            if user and user.tenant_id:
-                tenant = db.get(Tenant, user.tenant_id)
-                if tenant:
-                    return tenant
+            if user:
+                return _ensure_user_tenant(db, user)
 
     org_id = claims.get("org_id") or claims.get("organization_id")
     if org_id and claims.get("mode") == "clerk":

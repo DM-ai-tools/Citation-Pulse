@@ -1,3 +1,5 @@
+import { isFreshLogin } from "@/lib/authSession";
+
 let _warnedMisconfiguredApi = false;
 const BYPASS_AUTH = (process.env.NEXT_PUBLIC_AUTH_BYPASS || "").toLowerCase() === "true";
 
@@ -117,6 +119,7 @@ export async function apiClient(path: string, init: ApiClientOptions = {}) {
   if (
     auth &&
     clearSessionOn401 &&
+    !isFreshLogin() &&
     r.status === 401 &&
     !BYPASS_AUTH &&
     typeof window !== "undefined"

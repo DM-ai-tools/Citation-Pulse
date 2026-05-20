@@ -31,7 +31,7 @@ from citationpulse.services.sov_entities import (
 )
 from citationpulse.tasks.geo import start_scan_task
 
-router = APIRouter(prefix="/scans", tags=["scans"])
+router = APIRouter(prefix="/scans", tags=["scans"], redirect_slashes=False)
 secured_router = APIRouter(dependencies=[Depends(get_auth_context)])
 _log = logging.getLogger(__name__)
 

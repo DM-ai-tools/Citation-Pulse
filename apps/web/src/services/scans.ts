@@ -16,7 +16,7 @@ export async function createScan(body: {
   niche?: string;
   location?: string;
 }): Promise<{ scan_id: string }> {
-  const r = await apiFetch("/api/v1/scans", {
+  const r = await apiFetch("/api/v1/scans/", {
     method: "POST",
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(scanPostTimeoutMs),
