@@ -127,13 +127,20 @@ def resolve_tenant(db: Session, claims: dict[str, Any]) -> Tenant:
             db.refresh(tenant)
         return tenant
 
-    tenant = db.query(Tenant).order_by(Tenant.created_at.asc()).first()
-    if not tenant:
-        tenant = Tenant(name="Default", plan="saas")
-        db.add(tenant)
-        db.commit()
-        db.refresh(tenant)
-    return tenant
+    settings = get_settings()
+    if claims.get("mode") == "dev" and settings.environment.lower() in ("development", "dev", "local"):
+        tenant = db.query(Tenant).order_by(Tenant.created_at.asc()).first()
+        if not tenant:
+            tenant = Tenant(name="Default", plan="saas")
+            db.add(tenant)
+            db.commit()
+            db.refresh(tenant)
+        return tenant
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authenticated tenant required",
+    )
 
 
 def get_current_user(

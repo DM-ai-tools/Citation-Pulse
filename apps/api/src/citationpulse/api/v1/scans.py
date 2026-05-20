@@ -5,15 +5,15 @@ import json
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from citationpulse.api.deps import DbSession
+from citationpulse.api.deps import CurrentTenant, DbSession, get_auth_context
 from citationpulse.core.config import get_settings
 from citationpulse.db.session import SessionLocal
-from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent, all_engines
+from citationpulse.models.domain import Brand, EngineType, Prompt, Scan, ScanEvent, Tenant, all_engines
 from citationpulse.schemas.scans import ScanCreate, ScanCreateResponse, ShareBody
 from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
 from citationpulse.services.rate_limit import allow_anonymous_scan
@@ -24,7 +24,6 @@ from citationpulse.services.scans_flow import (
     available_engines,
     build_scan_report,
     build_scan_snapshot,
-    get_or_create_anonymous_tenant,
 )
 from citationpulse.services.sov_entities import (
     multi_entity_weekly_share_trend,
@@ -33,7 +32,13 @@ from citationpulse.services.sov_entities import (
 from citationpulse.tasks.geo import start_scan_task
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+auth_router = APIRouter(dependencies=[Depends(get_auth_context)])
 _log = logging.getLogger(__name__)
+
+
+def _assert_scan_tenant(scan: Scan, tenant: Tenant) -> None:
+    if scan.tenant_id != tenant.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found")
 
 
 def _enqueue_start_scan(scan_id: str) -> None:
@@ -58,10 +63,11 @@ SSE_HEADERS = {
 }
 
 
-@router.post("", response_model=ScanCreateResponse, status_code=status.HTTP_201_CREATED)
+@auth_router.post("", response_model=ScanCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_scan(
     request: Request,
     db: DbSession,
+    tenant: CurrentTenant,
     background_tasks: BackgroundTasks,
     body: ScanCreate,
 ) -> ScanCreateResponse:
@@ -81,7 +87,6 @@ def create_scan(
     if not root:
         raise HTTPException(status_code=400, detail="Could not parse domain from URL")
 
-    tenant = get_or_create_anonymous_tenant(db)
     main = Brand(
         tenant_id=tenant.id,
         name=root,
@@ -200,26 +205,25 @@ def _empty_weekly_from_multi(multi: dict[str, object], weeks: int) -> dict[str, 
     return {"primary_brand_id": primary_id, "weeks": weeks, "entities": entities_meta, "series": []}
 
 
-@router.get("/{scan_id}/report")
-def get_scan_report(scan_id: UUID, db: DbSession):
+@auth_router.get("/{scan_id}/report")
+def get_scan_report(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
     scan = _get_scan(db, scan_id)
+    _assert_scan_tenant(scan, tenant)
     return build_scan_report(db, scan)
 
 
-@router.get("/{scan_id}/sov/multi-engine")
+@auth_router.get("/{scan_id}/sov/multi-engine")
 def get_scan_sov_multi_engine(
     scan_id: UUID,
     db: DbSession,
+    tenant: CurrentTenant,
     response: Response,
     range: str = Query("30d", alias="range"),
 ):
-    """Multi-entity SoV by engine for this scan's brand (public; same access model as ``/report``).
-
-    Funnel report pages must not call ``GET /brands/.../sov/*`` (Clerk + tenant checks); use this
-    route keyed by ``scan_id`` instead.
-    """
+    """Multi-entity SoV by engine for this scan's brand (authenticated; keyed by ``scan_id``)."""
     response.headers["Cache-Control"] = "no-store"
     scan = _get_scan(db, scan_id)
+    _assert_scan_tenant(scan, tenant)
     brand = db.get(Brand, scan.brand_id)
     if not brand:
         raise HTTPException(status_code=404, detail="Scan has no brand")
@@ -227,37 +231,37 @@ def get_scan_sov_multi_engine(
     return multientity_sov_by_engine(db, brand.tenant_id, brand.id, days)
 
 
-@router.get("/{scan_id}/sov/multi-weekly-trend")
+@auth_router.get("/{scan_id}/sov/multi-weekly-trend")
 def get_scan_sov_multi_weekly_trend(
     scan_id: UUID,
     db: DbSession,
+    tenant: CurrentTenant,
     response: Response,
     weeks: int = Query(12, ge=4, le=52),
 ):
-    """Weekly multi-entity SoV for this scan's brand (public; same access model as ``/report``)."""
+    """Weekly multi-entity SoV for this scan's brand (authenticated)."""
     response.headers["Cache-Control"] = "no-store"
     scan = _get_scan(db, scan_id)
+    _assert_scan_tenant(scan, tenant)
     brand = db.get(Brand, scan.brand_id)
     if not brand:
         raise HTTPException(status_code=404, detail="Scan has no brand")
     return multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=weeks)
 
 
-@router.get("/{scan_id}/sov/summary")
+@auth_router.get("/{scan_id}/sov/summary")
 def get_scan_sov_summary(
     scan_id: UUID,
     db: DbSession,
+    tenant: CurrentTenant,
     response: Response,
     range: str = Query("84d", alias="range"),
     weeks: int = Query(12, ge=4, le=52),
 ):
-    """Return multi-engine + weekly SoV in one response (public; same access as ``/report``).
-
-    Funnel report pages use this instead of two parallel fetches so a single failing leg
-    does not surface as a hard error when the other succeeds.
-    """
+    """Return multi-engine + weekly SoV in one response (authenticated)."""
     response.headers["Cache-Control"] = "no-store"
     scan = _get_scan(db, scan_id)
+    _assert_scan_tenant(scan, tenant)
     brand = db.get(Brand, scan.brand_id)
     if not brand:
         raise HTTPException(status_code=404, detail="Scan has no brand")
@@ -286,11 +290,12 @@ def get_scan_sov_summary(
     return {"multi_engine": multi, "multi_weekly_trend": weekly}
 
 
-@router.post("/{scan_id}/share")
-def share_scan(scan_id: UUID, db: DbSession, body: ShareBody | None = None):
+@auth_router.post("/{scan_id}/share")
+def share_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant, body: ShareBody | None = None):
     import secrets
 
     scan = _get_scan(db, scan_id)
+    _assert_scan_tenant(scan, tenant)
     public = True if body is None else body.share_public
     scan.share_public = public
     if public and not scan.share_token:
@@ -360,9 +365,10 @@ async def _sse_gen(scan_id: UUID):
         await asyncio.sleep(poll_s)
 
 
-@router.get("/{scan_id}/stream")
-async def stream_scan(scan_id: UUID, db: DbSession):
-    _get_scan(db, scan_id)
+@auth_router.get("/{scan_id}/stream")
+async def stream_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
+    scan = _get_scan(db, scan_id)
+    _assert_scan_tenant(scan, tenant)
     return StreamingResponse(
         _sse_gen(scan_id),
         media_type="text/event-stream",
@@ -370,8 +376,12 @@ async def stream_scan(scan_id: UUID, db: DbSession):
     )
 
 
-@router.get("/{scan_id}")
-def get_scan(scan_id: UUID, db: DbSession):
+@auth_router.get("/{scan_id}")
+def get_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
     """Scan snapshot — registered **after** all ``/{scan_id}/…`` routes so ``/sov/…`` paths are not shadowed."""
     scan = _get_scan(db, scan_id)
+    _assert_scan_tenant(scan, tenant)
     return build_scan_snapshot(db, scan)
+
+
+router.include_router(auth_router)

@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from citationpulse.api.deps import get_auth_context
 from citationpulse.core.config import get_settings
 from citationpulse.schemas.competitors import CompetitorAnalyzeRequest, CompetitorDiscoveryResult
 from citationpulse.services.client_ip import effective_client_ip, is_mesh_or_unresolved_client_ip
 from citationpulse.services.competitor_discovery import CompetitorDiscoveryError, analyze_competitors
 from citationpulse.services.rate_limit import allow_competitor_analyze
 
-router = APIRouter(prefix="/competitors", tags=["competitors"])
+router = APIRouter(
+    prefix="/competitors",
+    tags=["competitors"],
+    dependencies=[Depends(get_auth_context)],
+)
 _log = logging.getLogger(__name__)
 
 

@@ -88,6 +88,14 @@ export type ApiClientOptions = RequestInit & {
   auth?: boolean;
 };
 
+function redirectToLogin() {
+  if (typeof window === "undefined") return;
+  const path = window.location.pathname;
+  if (path === "/login" || path === "/signup" || path.startsWith("/r/")) return;
+  const next = encodeURIComponent(path + window.location.search);
+  window.location.assign(`/login?next=${next}`);
+}
+
 export async function apiClient(path: string, init: ApiClientOptions = {}) {
   const { getToken, auth = true, ...rest } = init;
   const headers = new Headers(rest.headers);
@@ -97,11 +105,27 @@ export async function apiClient(path: string, init: ApiClientOptions = {}) {
   if (auth && !headers.has("Authorization")) {
     const t = getToken ? await getToken() : storedAccessToken();
     if (t) headers.set("Authorization", `Bearer ${t}`);
+    else if (typeof window !== "undefined") {
+      redirectToLogin();
+      throw new Error("Sign in required");
+    }
   }
-  return fetch(`${base()}${path}`, { ...rest, headers, credentials: "include" });
+  const r = await fetch(`${base()}${path}`, { ...rest, headers, credentials: "include" });
+  if (auth && r.status === 401 && typeof window !== "undefined") {
+    const { clearAuthSession } = await import("@/lib/authSession");
+    clearAuthSession();
+    redirectToLogin();
+    throw new Error("Session expired — sign in again");
+  }
+  return r;
 }
 
-/** Public fetch without Clerk (funnel + shared reports). */
-export function apiFetch(path: string, init: RequestInit = {}) {
-  return apiClient(path, init);
+/** Authenticated API call (default for app data). */
+export function apiFetch(path: string, init: ApiClientOptions = {}) {
+  return apiClient(path, { auth: true, ...init });
+}
+
+/** Unauthenticated call — only for token-based public share endpoints. */
+export function publicApiFetch(path: string, init: ApiClientOptions = {}) {
+  return apiClient(path, { auth: false, ...init });
 }
