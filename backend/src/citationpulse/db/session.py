@@ -7,10 +7,11 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from citationpulse.core.config import get_settings
+from citationpulse.db.urls import normalize_database_url
 
 _settings = get_settings()
 _engine = create_engine(
-    _settings.database_url,
+    normalize_database_url(_settings.database_url),
     pool_pre_ping=True,
     echo=False,
 )

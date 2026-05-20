@@ -7,6 +7,8 @@ from pathlib import Path
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from citationpulse.db.urls import normalize_database_url
+
 # apps/api/src/citationpulse/core/config.py → repo root is parents[5]
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _API_ROOT = Path(__file__).resolve().parents[3]
@@ -177,6 +179,13 @@ class Settings(BaseSettings):
             s = s[1:-1].strip()
         return s
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalise_database_url(cls, v: object) -> str:
+        if v is None:
+            return ""
+        return normalize_database_url(str(v))
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -185,7 +194,7 @@ def get_settings() -> Settings:
 
 def _to_sqla_url(database_url: str) -> str:
     """Map a SQLAlchemy psycopg URL to the form Celery's SQLAlchemy transport expects."""
-    return database_url
+    return normalize_database_url(database_url)
 
 
 def effective_celery_broker_url(s: Settings | None = None) -> str:

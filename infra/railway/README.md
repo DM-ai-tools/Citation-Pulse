@@ -57,7 +57,7 @@ Railway injects **`PORT` at runtime** (commonly **`8080`**). The web `Dockerfile
 
 Set these in Railway (shared variables are fine):
 
-- `DATABASE_URL` -> Railway Postgres URL (`postgresql://…` is auto-normalized to `postgresql+psycopg://…` on startup)
+- `DATABASE_URL` -> Railway Postgres URL (`postgresql://…` is rewritten to `postgresql+psycopg://…` at startup — required; plain `postgresql://` crashes without psycopg2)
 - Optional: `FORWARDED_ALLOW_IPS=*` (or rely on the API Dockerfile / start command) so Uvicorn trusts `X-Forwarded-*` from Railway’s edge. Anonymous scan rate limits use the resolved client IP.
 - Optional: `ANONYMOUS_SCAN_RATE_LIMIT_PER_HOUR` (default **24** in app settings) to tune landing-page abuse protection; use `0` only if you accept disabling that limit.
 - `OPENROUTER_API_KEY` -> required for scans (set on **both** API and worker if you use a separate worker; missing key yields OpenRouter HTTP 401). After deploy, open `GET /health` on the API: `openrouter_configured` must be `true` (no quotes or stray spaces in the variable value).
