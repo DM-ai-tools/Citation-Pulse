@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { hasServerJwtSecret, verifyAccessToken } from "@/lib/sessionToken";
 
-const BYPASS_AUTH = (process.env.AUTH_DISABLE_JWT || "").toLowerCase() === "true";
+const BYPASS_AUTH =
+  (process.env.AUTH_DISABLE_JWT || "").toLowerCase() === "true" ||
+  (process.env.NEXT_PUBLIC_AUTH_DISABLE_JWT || "").toLowerCase() === "true" ||
+  (process.env.NEXT_PUBLIC_AUTH_BYPASS || "").toLowerCase() === "true";
 
-/** Routes reachable without a valid session (login/legal/share links only). */
 const PUBLIC_EXACT = new Set(["/login", "/signup", "/privacy", "/terms", "/admin/login"]);
 
-/** Token-based public share pages (no account required). */
 function isPublicSharePath(pathname: string) {
   return pathname.startsWith("/r/");
 }
@@ -18,9 +19,7 @@ function isPublicPath(pathname: string) {
 
 async function sessionFromRequest(request: NextRequest) {
   if (BYPASS_AUTH) {
-    const token = request.cookies.get("cp_token")?.value?.trim() ?? "";
-    const role = (request.cookies.get("cp_role")?.value as "user" | "admin" | undefined) ?? "user";
-    return { authenticated: true as const, role, token };
+    return { authenticated: true as const, role: "user" as const, token: "dev-local" };
   }
   const token = request.cookies.get("cp_token")?.value?.trim() ?? "";
   if (!token) {
@@ -30,9 +29,8 @@ async function sessionFromRequest(request: NextRequest) {
   if (claims) {
     return { authenticated: true as const, role: claims.role, token };
   }
-  // Dev fallback when web service has no AUTH_JWT_SECRET: cookie presence only.
   if (!hasServerJwtSecret() && process.env.NODE_ENV !== "production") {
-    const role = request.cookies.get("cp_role")?.value ?? "user";
+    const role = (request.cookies.get("cp_role")?.value as "user" | "admin") ?? "user";
     return { authenticated: true as const, role, token };
   }
   return { authenticated: false as const, role: null, token: "" };
@@ -54,13 +52,13 @@ export async function middleware(request: NextRequest) {
 
   if (pathname === "/") {
     const url = request.nextUrl.clone();
-    url.pathname = session.authenticated ? "/landing" : "/login";
+    url.pathname = BYPASS_AUTH || session.authenticated ? "/landing" : "/login";
     url.search = "";
     return NextResponse.redirect(url);
   }
 
   if (isPublicPath(pathname)) {
-    if ((pathname === "/login" || pathname === "/signup") && session.authenticated) {
+    if ((pathname === "/login" || pathname === "/signup") && (BYPASS_AUTH || session.authenticated)) {
       const next = request.nextUrl.searchParams.get("next");
       const url = request.nextUrl.clone();
       url.pathname =
@@ -71,11 +69,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (!session.authenticated) {
+  if (!BYPASS_AUTH && !session.authenticated) {
     return redirectLogin(request, pathname);
   }
 
-  if (pathname.startsWith("/admin")) {
+  if (pathname.startsWith("/admin") && !BYPASS_AUTH) {
     if (session.role !== "admin") {
       const url = request.nextUrl.clone();
       url.pathname = "/admin/login";

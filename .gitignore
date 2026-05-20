@@ -41,6 +41,7 @@ tmp-*.json
 .env.*.local
 !.env.example
 !**/.env.example
+!.env.railway.example
 *.log
 .DS_Store
 .idea/

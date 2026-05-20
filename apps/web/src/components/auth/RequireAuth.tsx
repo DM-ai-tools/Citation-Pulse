@@ -4,7 +4,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Skeleton } from "@/components/primitives";
 import { useAuth } from "@/contexts/AuthContext";
-import { hasStoredSession, isFreshLogin } from "@/lib/authSession";
+import { isAuthBypass } from "@/lib/authBypass";
+import { hasStoredSession } from "@/lib/authSession";
 
 /** Client-side guard for protected pages. */
 export function RequireAuth({ children }: { children: ReactNode }) {
@@ -12,16 +13,21 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const sentToLogin = useRef(false);
-
+  const bypass = isAuthBypass();
   const allowed = Boolean(user || hasStoredSession());
 
   useEffect(() => {
-    if (loading || allowed || isFreshLogin()) return;
+    if (bypass) return;
+    if (loading || allowed) return;
     if (sentToLogin.current) return;
     sentToLogin.current = true;
     const next = encodeURIComponent(pathname);
     router.replace(`/login?next=${next}`);
-  }, [loading, allowed, pathname, router]);
+  }, [bypass, loading, allowed, pathname, router]);
+
+  if (bypass) {
+    return <>{children}</>;
+  }
 
   if (loading) {
     return (

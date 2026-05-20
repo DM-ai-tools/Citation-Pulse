@@ -1,5 +1,6 @@
 import { formatApiErrorBody } from "@/lib/apiErrors";
-import { apiFetch, publicApiBaseUrl } from "./apiClient";
+import { isAuthBypass } from "@/lib/authBypass";
+import { apiClient, apiFetch, publicApiBaseUrl } from "./apiClient";
 import type { ReportData } from "@/types/report";
 import type { ScanSnapshot } from "@/types/scan";
 
@@ -16,10 +17,11 @@ export async function createScan(body: {
   niche?: string;
   location?: string;
 }): Promise<{ scan_id: string }> {
-  const r = await apiFetch("/api/v1/scans/", {
+  const r = await apiClient("/api/v1/scans/", {
     method: "POST",
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(scanPostTimeoutMs),
+    auth: !isAuthBypass(),
   });
   if (!r.ok) {
     const t = await r.text();

@@ -1,5 +1,6 @@
-import { apiClient } from "@/services/apiClient";
+import { DEV_BYPASS_USER, isAuthBypass } from "@/lib/authBypass";
 import { normalizeAuthUser, type AuthUser } from "@/lib/authSession";
+import { apiClient } from "@/services/apiClient";
 
 export type AuthResponse = {
   access_token: string;
@@ -7,8 +8,6 @@ export type AuthResponse = {
   expires_at: string;
   user: AuthUser;
 };
-
-const BYPASS_AUTH = (process.env.NEXT_PUBLIC_AUTH_BYPASS || "").toLowerCase() === "true";
 
 function fallbackAuthResponse(input: { email?: string; name?: string; role?: "user" | "admin" }): AuthResponse {
   const email = (input.email || "demo@citationpulse.local").trim().toLowerCase();
@@ -42,7 +41,7 @@ export async function signup(payload: {
   });
   if (!r.ok) {
     if (r.status === 404) {
-      if (BYPASS_AUTH) return fallbackAuthResponse({ email: payload.email, name: payload.name, role: "user" });
+      if (isAuthBypass()) return fallbackAuthResponse({ email: payload.email, name: payload.name, role: "user" });
       throw new Error("Sign up failed");
     }
     const err = await r.json().catch(() => ({}));
@@ -71,7 +70,7 @@ export async function login(payload: { email: string; password: string; remember
   });
   if (!r.ok) {
     if (r.status === 404) {
-      if (BYPASS_AUTH) return fallbackAuthResponse({ email: payload.email, role: "user" });
+      if (isAuthBypass()) return fallbackAuthResponse({ email: payload.email, role: "user" });
       throw new Error("Login failed");
     }
     const err = await r.json().catch(() => ({}));
@@ -87,7 +86,7 @@ export async function adminLogin(payload: { username: string; password: string }
     body: JSON.stringify(payload),
   });
   if (!r.ok) {
-    if (r.status === 404 && BYPASS_AUTH) {
+    if (r.status === 404 && isAuthBypass()) {
       return fallbackAuthResponse({
         email: payload.username.includes("@") ? payload.username : `${payload.username}@citationpulse.local`,
         name: payload.username || "Admin",
@@ -112,8 +111,8 @@ export async function logout() {
 }
 
 export async function fetchMe(token: string) {
-  if (BYPASS_AUTH) {
-    return normalizeAuthUser(fallbackAuthResponse({ role: "user" }).user);
+  if (isAuthBypass()) {
+    return normalizeAuthUser(DEV_BYPASS_USER);
   }
   const r = await apiClient("/api/v1/auth/me", {
     getToken: async () => token,

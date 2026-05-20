@@ -2,8 +2,9 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { isAuthBypass } from "@/lib/authBypass";
 import { redirectAfterAuth } from "@/lib/authRedirect";
 import { markFreshLogin, normalizeAuthUser, setAuthSession } from "@/lib/authSession";
 import { AuthField } from "@/components/auth/AuthField";
@@ -21,6 +22,12 @@ export default function LoginPage() {
   const remember = true;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isAuthBypass()) {
+      router.replace("/landing");
+    }
+  }, [router]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

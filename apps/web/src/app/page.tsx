@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
 
-/** Send visitors to login; authenticated users reach /landing via the login flow or bookmark. */
+const bypass =
+  process.env.AUTH_DISABLE_JWT === "true" ||
+  process.env.NEXT_PUBLIC_AUTH_DISABLE_JWT === "true" ||
+  process.env.NEXT_PUBLIC_AUTH_BYPASS === "true";
+
 export default function HomePage() {
-  redirect("/login");
+  redirect(bypass ? "/landing" : "/login");
 }

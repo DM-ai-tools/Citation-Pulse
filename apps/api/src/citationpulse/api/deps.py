@@ -10,7 +10,7 @@ from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from citationpulse.core.config import get_settings
+from citationpulse.core.config import Settings, get_settings
 from citationpulse.db.session import get_db
 from citationpulse.models.domain import Membership, Tenant, User, UserRole, UserSession
 from citationpulse.services.auth_security import decode_access_token, hash_session_token
@@ -63,6 +63,20 @@ def _authenticate_local_bearer(db: Session, token: str) -> dict[str, Any] | None
     }
 
 
+def _open_dev_access(settings: Settings) -> bool:
+    """Phase-1 local access without JWT (see AUTH_DISABLE_JWT)."""
+    env = settings.environment.lower()
+    if env not in ("development", "dev", "local"):
+        return False
+    if settings.auth_disable_jwt:
+        return True
+    return (
+        settings.internal_phase1
+        and not (settings.clerk_jwks_url or "").strip()
+        and not (settings.auth_jwt_secret or "").strip()
+    )
+
+
 def get_auth_context(
     db: DbSession,
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
@@ -72,24 +86,17 @@ def get_auth_context(
     if settings.internal_api_key and x_api_key == settings.internal_api_key:
         return {"mode": "api_key", "sub": None, "org_id": None}
 
+    if _open_dev_access(settings):
+        if creds and creds.scheme.lower() == "bearer":
+            local = _authenticate_local_bearer(db, creds.credentials)
+            if local:
+                return local
+        return {"mode": "dev", "sub": "dev-user", "org_id": None}
+
     if creds and creds.scheme.lower() == "bearer":
         local = _authenticate_local_bearer(db, creds.credentials)
         if local:
             return local
-
-    dev_bypass = (
-        settings.internal_phase1
-        and settings.environment == "development"
-        and not settings.clerk_jwks_url
-        and not (settings.auth_jwt_secret or "").strip()
-    )
-    if dev_bypass:
-        if creds is None:
-            return {"mode": "dev", "sub": "dev-user", "org_id": None}
-        try:
-            return {"mode": "clerk", **decode_clerk_token(creds.credentials)}
-        except jwt.PyJWTError:
-            return {"mode": "dev", "sub": "dev-user", "org_id": None}
 
     if creds is None or creds.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")

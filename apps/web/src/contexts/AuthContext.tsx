@@ -9,11 +9,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { DEV_BYPASS_USER, isAuthBypass } from "@/lib/authBypass";
 import {
   clearAuthSession,
   getStoredToken,
   getStoredUser,
   normalizeAuthUser,
+  setAuthSession,
   type AuthUser,
 } from "@/lib/authSession";
 
@@ -34,6 +36,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (isAuthBypass()) {
+      const devUser = normalizeAuthUser(DEV_BYPASS_USER);
+      setToken("dev-local");
+      setUser(devUser);
+      setAuthSession("dev-local", devUser, true);
+      setLoading(false);
+      return;
+    }
     const t = getStoredToken();
     const u = getStoredUser();
     if (t && u) {
@@ -49,6 +59,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(() => {
+    if (isAuthBypass()) {
+      const devUser = normalizeAuthUser(DEV_BYPASS_USER);
+      setAuthSession("dev-local", devUser, true);
+      setToken("dev-local");
+      setUser(devUser);
+      return;
+    }
     clearAuthSession();
     setToken(null);
     setUser(null);
