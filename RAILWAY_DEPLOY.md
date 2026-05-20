@@ -2,7 +2,7 @@
 
 Canonical services use **`apps/api`** and **`apps/web`** (not legacy `backend/` / `frontend/`).
 
-If you still deploy from **`backend/`** (Dockerfile path `/backend/Dockerfile`), keep that folder in sync with `apps/api` or switch the service **Root directory** to `apps/api` and Dockerfile to `Dockerfile`.
+**Backend build context:** `apps/api/Dockerfile` works with either Root Directory `apps/api` **or** repo root `.` with Dockerfile path `apps/api/Dockerfile` (fixes `pyproject.toml not found`). Legacy `backend/Dockerfile` does not include auth routes.
 
 ## Services
 

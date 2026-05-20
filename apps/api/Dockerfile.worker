@@ -1,14 +1,23 @@
+# Works when Railway Root Directory is ``apps/api`` OR monorepo root with Dockerfile path ``apps/api/Dockerfile.worker``.
 FROM python:3.12-slim
 
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=120
 
-COPY pyproject.toml README.md ./
-COPY src ./src
+COPY . /ctx
 
-RUN pip install --no-cache-dir --no-compile .
+RUN set -eux; \
+    if [ -f /ctx/apps/api/pyproject.toml ]; then APP=/ctx/apps/api; \
+    elif [ -f /ctx/pyproject.toml ]; then APP=/ctx; \
+    else echo "ERROR: no apps/api/pyproject.toml in build context"; ls -la /ctx; exit 1; fi; \
+    cp "$APP/pyproject.toml" .; \
+    if [ -f "$APP/README.md" ]; then cp "$APP/README.md" .; fi; \
+    cp -r "$APP/src" ./src; \
+    pip install --no-cache-dir --no-compile .
 
 CMD ["sh", "-c", "celery -A citationpulse.celery_app worker -Q default -l info --pool=solo"]
