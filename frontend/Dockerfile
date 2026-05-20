@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Legacy Railway service may still point to frontend/Dockerfile.
 # Build canonical monorepo web app (apps/web) so production reflects new auth UI/routes.
-COPY package.json package-lock.json* ./
+COPY package*.json ./
 COPY apps/web/package.json ./apps/web/package.json
 COPY packages ./packages
 
