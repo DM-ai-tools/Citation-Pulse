@@ -7,8 +7,6 @@
 **/.ruff_cache
 **/.next
 **/node_modules
-apps/web
-frontend
 _MConverter.eu_*
 *.md
 !backend/README.md
