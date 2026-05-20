@@ -1,4 +1,5 @@
 let _warnedMisconfiguredApi = false;
+const BYPASS_AUTH = (process.env.NEXT_PUBLIC_AUTH_BYPASS || "").toLowerCase() === "true";
 
 /**
  * When ``NEXT_PUBLIC_API_URL`` is ``same-origin`` (or ``relative``), the browser calls
@@ -105,13 +106,13 @@ export async function apiClient(path: string, init: ApiClientOptions = {}) {
   if (auth && !headers.has("Authorization")) {
     const t = getToken ? await getToken() : storedAccessToken();
     if (t) headers.set("Authorization", `Bearer ${t}`);
-    else if (typeof window !== "undefined") {
+    else if (!BYPASS_AUTH && typeof window !== "undefined") {
       redirectToLogin();
       throw new Error("Sign in required");
     }
   }
   const r = await fetch(`${base()}${path}`, { ...rest, headers, credentials: "include" });
-  if (auth && r.status === 401 && typeof window !== "undefined") {
+  if (auth && r.status === 401 && !BYPASS_AUTH && typeof window !== "undefined") {
     const { clearAuthSession } = await import("@/lib/authSession");
     clearAuthSession();
     redirectToLogin();
