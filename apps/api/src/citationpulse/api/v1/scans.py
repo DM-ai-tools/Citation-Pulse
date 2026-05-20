@@ -32,7 +32,7 @@ from citationpulse.services.sov_entities import (
 from citationpulse.tasks.geo import start_scan_task
 
 router = APIRouter(prefix="/scans", tags=["scans"])
-auth_router = APIRouter(dependencies=[Depends(get_auth_context)])
+secured_router = APIRouter(dependencies=[Depends(get_auth_context)])
 _log = logging.getLogger(__name__)
 
 
@@ -63,7 +63,7 @@ SSE_HEADERS = {
 }
 
 
-@auth_router.post("", response_model=ScanCreateResponse, status_code=status.HTTP_201_CREATED)
+@secured_router.post("/", response_model=ScanCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_scan(
     request: Request,
     db: DbSession,
@@ -205,14 +205,14 @@ def _empty_weekly_from_multi(multi: dict[str, object], weeks: int) -> dict[str, 
     return {"primary_brand_id": primary_id, "weeks": weeks, "entities": entities_meta, "series": []}
 
 
-@auth_router.get("/{scan_id}/report")
+@secured_router.get("/{scan_id}/report")
 def get_scan_report(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
     scan = _get_scan(db, scan_id)
     _assert_scan_tenant(scan, tenant)
     return build_scan_report(db, scan)
 
 
-@auth_router.get("/{scan_id}/sov/multi-engine")
+@secured_router.get("/{scan_id}/sov/multi-engine")
 def get_scan_sov_multi_engine(
     scan_id: UUID,
     db: DbSession,
@@ -231,7 +231,7 @@ def get_scan_sov_multi_engine(
     return multientity_sov_by_engine(db, brand.tenant_id, brand.id, days)
 
 
-@auth_router.get("/{scan_id}/sov/multi-weekly-trend")
+@secured_router.get("/{scan_id}/sov/multi-weekly-trend")
 def get_scan_sov_multi_weekly_trend(
     scan_id: UUID,
     db: DbSession,
@@ -249,7 +249,7 @@ def get_scan_sov_multi_weekly_trend(
     return multi_entity_weekly_share_trend(db, brand.tenant_id, brand.id, weeks=weeks)
 
 
-@auth_router.get("/{scan_id}/sov/summary")
+@secured_router.get("/{scan_id}/sov/summary")
 def get_scan_sov_summary(
     scan_id: UUID,
     db: DbSession,
@@ -290,7 +290,7 @@ def get_scan_sov_summary(
     return {"multi_engine": multi, "multi_weekly_trend": weekly}
 
 
-@auth_router.post("/{scan_id}/share")
+@secured_router.post("/{scan_id}/share")
 def share_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant, body: ShareBody | None = None):
     import secrets
 
@@ -365,7 +365,7 @@ async def _sse_gen(scan_id: UUID):
         await asyncio.sleep(poll_s)
 
 
-@auth_router.get("/{scan_id}/stream")
+@secured_router.get("/{scan_id}/stream")
 async def stream_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
     scan = _get_scan(db, scan_id)
     _assert_scan_tenant(scan, tenant)
@@ -376,7 +376,7 @@ async def stream_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
     )
 
 
-@auth_router.get("/{scan_id}")
+@secured_router.get("/{scan_id}")
 def get_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
     """Scan snapshot — registered **after** all ``/{scan_id}/…`` routes so ``/sov/…`` paths are not shadowed."""
     scan = _get_scan(db, scan_id)
@@ -384,4 +384,4 @@ def get_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
     return build_scan_snapshot(db, scan)
 
 
-router.include_router(auth_router)
+router.include_router(secured_router)
