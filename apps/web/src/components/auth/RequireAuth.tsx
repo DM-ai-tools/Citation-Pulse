@@ -1,27 +1,27 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Skeleton } from "@/components/primitives";
 import { useAuth } from "@/contexts/AuthContext";
-import { getStoredToken, getStoredUser } from "@/lib/authSession";
+import { hasStoredSession, isFreshLogin } from "@/lib/authSession";
 
-/** Client-side guard for protected pages (pairs with edge middleware). */
+/** Client-side guard for protected pages. */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, token, loading } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const sentToLogin = useRef(false);
 
-  const hasSession = Boolean(user || token || getStoredToken());
-  const canRender = Boolean(user || getStoredUser());
+  const allowed = Boolean(user || hasStoredSession());
 
   useEffect(() => {
-    if (loading) return;
-    if (!hasSession) {
-      const next = encodeURIComponent(pathname);
-      router.replace(`/login?next=${next}`);
-    }
-  }, [loading, hasSession, pathname, router]);
+    if (loading || allowed || isFreshLogin()) return;
+    if (sentToLogin.current) return;
+    sentToLogin.current = true;
+    const next = encodeURIComponent(pathname);
+    router.replace(`/login?next=${next}`);
+  }, [loading, allowed, pathname, router]);
 
   if (loading) {
     return (
@@ -32,7 +32,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!canRender) return null;
+  if (!allowed) return null;
 
   return <>{children}</>;
 }

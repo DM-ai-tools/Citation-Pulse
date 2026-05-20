@@ -2,10 +2,10 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
-import { navigateAfterAuth } from "@/lib/authRedirect";
-import { hasStoredSession, normalizeAuthUser, setAuthSession } from "@/lib/authSession";
+import { redirectAfterAuth } from "@/lib/authRedirect";
+import { markFreshLogin, normalizeAuthUser, setAuthSession } from "@/lib/authSession";
 import { AuthField } from "@/components/auth/AuthField";
 import { AuthFooterLink, AuthShell } from "@/components/auth/AuthShell";
 import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
@@ -22,12 +22,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (hasStoredSession()) {
-      navigateAfterAuth(router, "/landing");
-    }
-  }, [router]);
-
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -35,11 +29,12 @@ export default function LoginPage() {
     try {
       const res = await login({ email: email.trim().toLowerCase(), password, remember });
       const user = normalizeAuthUser(res.user);
+      markFreshLogin();
       setAuthSession(res.access_token, user, remember);
       setSession(res.access_token, user);
       await queryClient.invalidateQueries();
       toast.success("Welcome back");
-      navigateAfterAuth(router, "/landing");
+      router.replace(redirectAfterAuth("/landing"));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Login failed";
       setError(msg);

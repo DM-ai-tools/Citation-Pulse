@@ -14,12 +14,8 @@ import {
   getStoredToken,
   getStoredUser,
   normalizeAuthUser,
-  setAuthSession,
   type AuthUser,
 } from "@/lib/authSession";
-import { fetchMe } from "@/services/auth";
-
-const BYPASS_AUTH = (process.env.NEXT_PUBLIC_AUTH_BYPASS || "").toLowerCase() === "true";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -32,47 +28,19 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
     const t = getStoredToken();
     const u = getStoredUser();
-    if (!t || !u) {
-      setLoading(false);
-      return;
+    if (t && u) {
+      setToken(t);
+      setUser(u);
     }
-    setToken(t);
-    setUser(u);
     setLoading(false);
-
-    if (BYPASS_AUTH) {
-      return;
-    }
-
-    // Background refresh only — never block UI. Ignore stale responses after login/logout.
-    void fetchMe(t)
-      .then((fresh) => {
-        if (cancelled || getStoredToken() !== t) return;
-        setUser(fresh);
-        setAuthSession(t, fresh, true);
-      })
-      .catch((err: unknown) => {
-        if (cancelled || getStoredToken() !== t) return;
-        const msg = err instanceof Error ? err.message : "";
-        if (msg === "Session expired") {
-          clearAuthSession();
-          setToken(null);
-          setUser(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   const setSession = useCallback((t: string, u: AuthUser) => {

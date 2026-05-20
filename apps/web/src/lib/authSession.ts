@@ -1,5 +1,6 @@
 const TOKEN_KEY = "cp_access_token";
 const USER_KEY = "cp_user";
+const FRESH_LOGIN_KEY = "cp_fresh_login";
 
 export type AuthUser = {
   id: string;
@@ -39,6 +40,26 @@ export function getStoredUser(): AuthUser | null {
   }
 }
 
+/** Set after a successful login/signup so guards do not fight navigation for a few seconds. */
+export function markFreshLogin() {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(FRESH_LOGIN_KEY, String(Date.now()));
+}
+
+export function isFreshLogin(maxAgeMs = 15_000): boolean {
+  if (typeof window === "undefined") return false;
+  const raw = sessionStorage.getItem(FRESH_LOGIN_KEY);
+  if (!raw) return false;
+  const ts = Number(raw);
+  if (!Number.isFinite(ts)) return false;
+  return Date.now() - ts < maxAgeMs;
+}
+
+export function clearFreshLogin() {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(FRESH_LOGIN_KEY);
+}
+
 export function setAuthSession(token: string, user: AuthUser | Record<string, unknown>, remember = false) {
   const normalized = normalizeAuthUser(user);
   localStorage.setItem(TOKEN_KEY, token);
@@ -52,6 +73,7 @@ export function setAuthSession(token: string, user: AuthUser | Record<string, un
 export function clearAuthSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  clearFreshLogin();
   document.cookie = "cp_token=; path=/; max-age=0";
   document.cookie = "cp_role=; path=/; max-age=0";
 }
