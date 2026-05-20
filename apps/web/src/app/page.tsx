@@ -1,10 +1,6 @@
 import { redirect } from "next/navigation";
-
-const bypass =
-  process.env.AUTH_DISABLE_JWT === "true" ||
-  process.env.NEXT_PUBLIC_AUTH_DISABLE_JWT === "true" ||
-  process.env.NEXT_PUBLIC_AUTH_BYPASS === "true";
+import { isAuthBypass } from "@/lib/authBypass";
 
 export default function HomePage() {
-  redirect(bypass ? "/landing" : "/login");
+  redirect(isAuthBypass() ? "/landing" : "/login");
 }

@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isAuthBypass } from "@/lib/authBypass";
 import { hasServerJwtSecret, verifyAccessToken } from "@/lib/sessionToken";
-
-const BYPASS_AUTH =
-  (process.env.AUTH_DISABLE_JWT || "").toLowerCase() === "true" ||
-  (process.env.NEXT_PUBLIC_AUTH_DISABLE_JWT || "").toLowerCase() === "true" ||
-  (process.env.NEXT_PUBLIC_AUTH_BYPASS || "").toLowerCase() === "true";
 
 const PUBLIC_EXACT = new Set(["/login", "/signup", "/privacy", "/terms", "/admin/login"]);
 
@@ -18,7 +14,7 @@ function isPublicPath(pathname: string) {
 }
 
 async function sessionFromRequest(request: NextRequest) {
-  if (BYPASS_AUTH) {
+  if (isAuthBypass()) {
     return { authenticated: true as const, role: "user" as const, token: "dev-local" };
   }
   const token = request.cookies.get("cp_token")?.value?.trim() ?? "";
@@ -48,17 +44,24 @@ function redirectLogin(request: NextRequest, nextPath?: string) {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const session = await sessionFromRequest(request);
+  let session: Awaited<ReturnType<typeof sessionFromRequest>>;
+  try {
+    session = await sessionFromRequest(request);
+  } catch {
+    session = { authenticated: false as const, role: null, token: "" };
+  }
+  const bypass = isAuthBypass();
 
   if (pathname === "/") {
     const url = request.nextUrl.clone();
-    url.pathname = BYPASS_AUTH || session.authenticated ? "/landing" : "/login";
+    url.pathname = bypass || session.authenticated ? "/landing" : "/login";
     url.search = "";
     return NextResponse.redirect(url);
   }
 
   if (isPublicPath(pathname)) {
-    if ((pathname === "/login" || pathname === "/signup") && (BYPASS_AUTH || session.authenticated)) {
+    // Dev bypass only: auto-skip login/signup. Production always renders these pages (Railway healthcheck uses /login).
+    if (bypass && (pathname === "/login" || pathname === "/signup")) {
       const next = request.nextUrl.searchParams.get("next");
       const url = request.nextUrl.clone();
       url.pathname =
@@ -69,11 +72,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (!BYPASS_AUTH && !session.authenticated) {
+  if (!bypass && !session.authenticated) {
     return redirectLogin(request, pathname);
   }
 
-  if (pathname.startsWith("/admin") && !BYPASS_AUTH) {
+  if (pathname.startsWith("/admin") && !bypass) {
     if (session.role !== "admin") {
       const url = request.nextUrl.clone();
       url.pathname = "/admin/login";
