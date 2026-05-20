@@ -2,16 +2,15 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { redirectAfterAuth } from "@/lib/authRedirect";
-import { normalizeAuthUser } from "@/lib/authSession";
+import { navigateAfterAuth } from "@/lib/authRedirect";
+import { hasStoredSession, normalizeAuthUser, setAuthSession } from "@/lib/authSession";
 import { AuthField } from "@/components/auth/AuthField";
 import { AuthFooterLink, AuthShell } from "@/components/auth/AuthShell";
 import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { passwordIssues } from "@/lib/passwordStrength";
-import { setAuthSession } from "@/lib/authSession";
 import { signup } from "@/services/auth";
 
 export default function SignupPage() {
@@ -19,6 +18,12 @@ export default function SignupPage() {
   const queryClient = useQueryClient();
   const { setSession } = useAuth();
   const [email, setEmail] = useState("");
+
+  useEffect(() => {
+    if (hasStoredSession()) {
+      navigateAfterAuth(router, "/landing");
+    }
+  }, [router]);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -51,7 +56,7 @@ export default function SignupPage() {
       setSession(res.access_token, user);
       await queryClient.invalidateQueries();
       toast.success("Account created");
-      router.push(redirectAfterAuth("/landing"));
+      navigateAfterAuth(router, "/landing");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Signup failed";
       setError(msg);

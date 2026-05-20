@@ -25,6 +25,10 @@ export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+export function hasStoredSession(): boolean {
+  return Boolean(getStoredToken() && getStoredUser());
+}
+
 export function getStoredUser(): AuthUser | null {
   if (typeof window === "undefined") return null;
   try {

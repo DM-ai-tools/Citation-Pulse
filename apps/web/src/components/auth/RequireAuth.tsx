@@ -4,20 +4,24 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { Skeleton } from "@/components/primitives";
 import { useAuth } from "@/contexts/AuthContext";
+import { getStoredToken, getStoredUser } from "@/lib/authSession";
 
 /** Client-side guard for protected pages (pairs with edge middleware). */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, token, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
+  const hasSession = Boolean(user || token || getStoredToken());
+  const canRender = Boolean(user || getStoredUser());
+
   useEffect(() => {
     if (loading) return;
-    if (!user) {
+    if (!hasSession) {
       const next = encodeURIComponent(pathname);
       router.replace(`/login?next=${next}`);
     }
-  }, [loading, user, pathname, router]);
+  }, [loading, hasSession, pathname, router]);
 
   if (loading) {
     return (
@@ -28,7 +32,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!user) return null;
+  if (!canRender) return null;
 
   return <>{children}</>;
 }

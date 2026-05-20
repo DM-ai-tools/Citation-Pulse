@@ -32,12 +32,13 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     const t = getStoredToken();
     const u = getStoredUser();
     if (!t || !u) {
@@ -46,30 +47,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setToken(t);
     setUser(u);
+    setLoading(false);
+
     if (BYPASS_AUTH) {
-      setLoading(false);
       return;
     }
-    fetchMe(t)
+
+    // Background refresh only — never block UI. Ignore stale responses after login/logout.
+    void fetchMe(t)
       .then((fresh) => {
+        if (cancelled || getStoredToken() !== t) return;
         setUser(fresh);
         setAuthSession(t, fresh, true);
       })
       .catch((err: unknown) => {
+        if (cancelled || getStoredToken() !== t) return;
         const msg = err instanceof Error ? err.message : "";
         if (msg === "Session expired") {
           clearAuthSession();
           setToken(null);
           setUser(null);
         }
-        // Network/proxy errors: keep stored session so login → landing is not bounced.
-      })
-      .finally(() => setLoading(false));
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setSession = useCallback((t: string, u: AuthUser) => {
     setToken(t);
-    setUser(u);
+    setUser(normalizeAuthUser(u));
   }, []);
 
   const signOut = useCallback(() => {
