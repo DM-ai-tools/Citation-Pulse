@@ -19,12 +19,22 @@ from citationpulse.services.engine_routing import (
 )
 from citationpulse.services.llm_router import (
     LLMCitation,
-    LLMProviderError,
     LLMResponse,
     _URL_RE,
     _extract_citations,
     _extract_text,
 )
+
+
+class DirectProviderError(RuntimeError):
+    """Non-OpenRouter provider failure (OpenAI / Anthropic direct)."""
+
+    def __init__(self, provider: str, status_code: int, body: str) -> None:
+        super().__init__(f"{provider} HTTP {status_code}: {body[:300]}")
+        self.provider = provider
+        self.status_code = status_code
+        self.body = body
+
 
 _log = logging.getLogger(__name__)
 
@@ -55,7 +65,7 @@ async def openai_chat_completion(
     except Exception as exc:  # noqa: BLE001
         status = getattr(exc, "status_code", None) or 502
         body = str(exc)
-        raise LLMProviderError(int(status) if isinstance(status, int) else 502, body) from exc
+        raise DirectProviderError("OpenAI", int(status) if isinstance(status, int) else 502, body) from exc
 
     payload = resp.model_dump()
     text = _extract_text(payload)
@@ -173,7 +183,9 @@ async def anthropic_chat_completion(
             msg = await client.messages.create(**kwargs)
         except Exception as exc:  # noqa: BLE001
             status = getattr(exc, "status_code", None) or 502
-            raise LLMProviderError(int(status) if isinstance(status, int) else 502, str(exc)) from exc
+            raise DirectProviderError(
+                "Anthropic", int(status) if isinstance(status, int) else 502, str(exc)
+            ) from exc
 
     payload = msg.model_dump()
     text_parts: list[str] = []
