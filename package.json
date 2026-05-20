@@ -20,8 +20,10 @@
     "dev:web": "npm run dev -w citationpulse-web",
     "dev:geo:web": "npm run dev -w citationpulse-web",
     "build": "npm run build -w citationpulse-web",
+    "build:web": "npm run build -w citationpulse-web",
     "build:geo:web": "npm run build -w citationpulse-web",
     "start": "npm run start -w citationpulse-web",
+    "start:web": "npm run start -w citationpulse-web",
     "lint": "npm run lint -w citationpulse-web",
     "lint:geo:web": "npm run lint -w citationpulse-web",
     "dev:restart": "kill-port 3000 8000 && npm run dev"

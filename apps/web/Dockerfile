@@ -22,6 +22,8 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 
+ENV NODE_ENV=production
+
 ARG NEXT_PUBLIC_API_URL
 ARG API_PROXY_TARGET
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
@@ -60,8 +62,14 @@ RUN set -eux; \
     fi; \
     if [ -f /app/apps/web/package.json ]; then \
       npm run build -w citationpulse-web; \
+      mkdir -p /out; \
+      cp -r /app/apps/web/.next /out/.next; \
+      cp /app/apps/web/package.json /out/package.json; \
     else \
       npm run build; \
+      mkdir -p /out; \
+      cp -r /app/.next /out/.next; \
+      cp /app/package.json /out/package.json; \
     fi
 
 FROM node:22-alpine
@@ -71,21 +79,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-COPY --from=build /app /buildctx
+COPY --from=build /out/.next ./.next
+COPY --from=build /out/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 
-RUN set -eux; \
-    if [ -d /buildctx/apps/web/.next ]; then \
-      cp -r /buildctx/apps/web/.next ./.next; \
-      cp /buildctx/apps/web/package.json ./package.json; \
-    elif [ -d /buildctx/.next ]; then \
-      cp -r /buildctx/.next ./.next; \
-      cp /buildctx/package.json ./package.json; \
-    else \
-      echo "ERROR: no Next.js build output (.next)"; \
-      ls -la /buildctx; \
-      exit 1; \
-    fi
+RUN npm prune --omit=dev 2>/dev/null || true
 
 EXPOSE 3000
 
