@@ -42,10 +42,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-COPY --from=build /app/.next ./.next
+COPY --from=build /app/apps/web/.next ./.next
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/package.json ./package.json
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "npm run start -- --port ${PORT:-3000}"]
+CMD ["sh", "-c", "npm run start -- --hostname 0.0.0.0 --port ${PORT:-3000}"]
