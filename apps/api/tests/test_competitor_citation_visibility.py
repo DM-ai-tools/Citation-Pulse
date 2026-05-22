@@ -10,6 +10,13 @@ _SRC = os.path.normpath(os.path.join(_HERE, "..", "src"))
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
+_VALIDATED_DISCOVERY = {"validation_summary": {"validation_complete": True}}
+
+
+def _discovery(extra: dict) -> dict:
+    return {**extra, **_VALIDATED_DISCOVERY}
+
+
 from citationpulse.services.competitor_citation_visibility import (  # noqa: E402
     DISPLAY_MAX_COMPETITORS,
     TARGET_ABOVE_TIER_MAX,
@@ -17,6 +24,7 @@ from citationpulse.services.competitor_citation_visibility import (  # noqa: E40
     _collect_engine_citations,
     _count_cited_by_tier,
     _display_cited_competitors,
+    _display_user_provided_cited,
     _discovery_competitor_map,
     build_competitor_citation_visibility,
 )
@@ -87,6 +95,26 @@ def test_build_visibility_ranks_by_engine_count():
                 "citations": [],
             },
         ],
+        "one_level_above_competitors": [
+            {
+                "domain": "u1.com.au",
+                "name": "U1",
+                "tier": "Tier 3",
+                "rank": 1,
+                "citation_strength_score": 0.8,
+                "reasoning": "u1",
+                "citations": [],
+            },
+            {
+                "domain": "u2.com.au",
+                "name": "U2",
+                "tier": "Tier 3",
+                "rank": 2,
+                "citation_strength_score": 0.7,
+                "reasoning": "u2",
+                "citations": [],
+            },
+        ],
         "one_level_above_competitors": [],
     }
     cells = [
@@ -106,15 +134,15 @@ def test_build_visibility_ranks_by_engine_count():
         competitor_discovery=discovery,
         prompts=[{"text": "best pest control sydney"}],
     )
-    ranked = out["ranked_competitors"]
-    assert ranked[0]["domain"] == "b.com.au"
-    assert ranked[0]["engine_count"] == 2
-    assert "citations_by_engine" in ranked[0]
-    assert len(ranked[0]["citations_by_engine"]["chatgpt"]) == 1
+    pool = out["all_ranked_competitors"]
+    assert pool[0]["domain"] == "b.com.au"
+    assert pool[0]["engine_count"] == 2
+    assert "citations_by_engine" in pool[0]
+    assert len(pool[0]["citations_by_engine"]["chatgpt"]) == 1
 
 
 def test_build_visibility_by_prompt_filters_cells():
-    discovery = {
+    discovery = _discovery({
         "same_level_competitors": [
             {
                 "domain": "hipages.com.au",
@@ -127,7 +155,7 @@ def test_build_visibility_by_prompt_filters_cells():
             }
         ],
         "one_level_above_competitors": [],
-    }
+    })
     p1, p2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
     cells = [
         {
@@ -160,8 +188,8 @@ def test_build_visibility_by_prompt_filters_cells():
     assert len(by_prompt) == 2
     p1_vis = next(x for x in by_prompt if x["prompt_id"] == p1)
     p2_vis = next(x for x in by_prompt if x["prompt_id"] == p2)
-    assert p1_vis["engine_cited_count"] == 1
-    assert p2_vis["engine_cited_count"] == 0
+    assert p1_vis["total_cited_pool"] == 1
+    assert p2_vis["total_cited_pool"] == 0
 
 
 def test_user_provided_competitors_included():
@@ -192,6 +220,7 @@ def test_user_provided_competitors_included():
 
     class _Scan:
         brand_id = "brand-1"
+        id = "scan-test-id"
 
     class _Db:
         def get(self, model, pk):
@@ -200,6 +229,13 @@ def test_user_provided_competitors_included():
             if model is Brand and pk == "user-brand-id":
                 return _UserBrand()
             return None
+
+        def scalars(self, _stmt):
+            class _Rows:
+                def all(self):
+                    return []
+
+            return _Rows()
 
     out = build_competitor_citation_visibility(
         _Db(),  # type: ignore[arg-type]
@@ -218,39 +254,43 @@ def test_user_provided_competitors_included():
     assert len(out["discovery_only"]) >= 1
 
 
+def _two_engine_row(**kwargs: object) -> dict:
+    base = dict(kwargs)
+    base.setdefault("cited_by_engines", True)
+    base.setdefault("engines", ["chatgpt", "claude"])
+    base.setdefault("cited_engines", ["chatgpt", "claude"])
+    base.setdefault("engine_count", 2)
+    base.setdefault("citation_count", 2)
+    dom = str(base.get("domain", "x.com.au"))
+    base.setdefault(
+        "citations_by_engine",
+        {
+            "chatgpt": [{"url": f"https://{dom}", "position": 1}],
+            "claude": [{"url": f"https://{dom}/about", "position": 2}],
+        },
+    )
+    return base
+
+
 def test_display_cited_tier_balanced_caps():
     ranked = []
     for i in range(5):
         ranked.append(
-            {
-                "domain": f"same{i}.com.au",
-                "name": f"S{i}",
-                "level": "same_level",
-                "cited_by_engines": True,
-                "engines": ["chatgpt"],
-                "cited_engines": ["chatgpt"],
-                "engine_count": 1,
-                "citation_count": 1,
-                "citations_by_engine": {"chatgpt": [{"url": f"https://same{i}.com.au", "position": 1}]},
-                "engine_citations": [],
-                "visibility_score": 90 - i,
-            }
+            _two_engine_row(
+                domain=f"same{i}.com.au",
+                name=f"S{i}",
+                level="same_level",
+                visibility_score=90 - i,
+            )
         )
     for i in range(5):
         ranked.append(
-            {
-                "domain": f"above{i}.com.au",
-                "name": f"A{i}",
-                "level": "one_level_above",
-                "cited_by_engines": True,
-                "engines": ["chatgpt"],
-                "cited_engines": ["chatgpt"],
-                "engine_count": 1,
-                "citation_count": 1,
-                "citations_by_engine": {"chatgpt": [{"url": f"https://above{i}.com.au", "position": 2}]},
-                "engine_citations": [],
-                "visibility_score": 80 - i,
-            }
+            _two_engine_row(
+                domain=f"above{i}.com.au",
+                name=f"A{i}",
+                level="one_level_above",
+                visibility_score=80 - i,
+            )
         )
     display = _display_cited_competitors(ranked)
     assert len(display) == DISPLAY_MAX_COMPETITORS
@@ -258,6 +298,43 @@ def test_display_cited_tier_balanced_caps():
     assert same == TARGET_SAME_TIER_MAX
     assert above == TARGET_ABOVE_TIER_MAX
     assert all(r.get("cited_engines_detail") for r in display)
+
+
+def test_display_user_provided_cited_any_engine():
+    ranked = [
+        {
+            "domain": "userco.com.au",
+            "name": "User Co",
+            "level": "user_provided",
+            "user_provided": True,
+            "cited_by_engines": True,
+            "engines": ["chatgpt"],
+            "cited_engines": ["chatgpt"],
+            "engine_count": 1,
+            "citation_count": 1,
+            "citations_by_engine": {"chatgpt": [{"url": "https://userco.com.au", "position": 1}]},
+            "engine_citations": [],
+        },
+        {
+            "domain": "other.com.au",
+            "name": "Other",
+            "level": "same_level",
+            "user_provided": False,
+            "cited_by_engines": True,
+            "engines": ["chatgpt", "claude"],
+            "cited_engines": ["chatgpt", "claude"],
+            "engine_count": 2,
+            "citation_count": 2,
+            "citations_by_engine": {
+                "chatgpt": [{"url": "https://other.com.au"}],
+                "claude": [{"url": "https://other.com.au/about"}],
+            },
+            "engine_citations": [],
+        },
+    ]
+    display = _display_user_provided_cited(ranked)
+    assert len(display) == 1
+    assert display[0]["domain"] == "userco.com.au"
 
 
 def test_display_cited_excludes_uncited_and_balances_tiers():

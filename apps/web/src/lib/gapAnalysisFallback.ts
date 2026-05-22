@@ -1,4 +1,4 @@
-import { gapShortLabel } from "@/lib/gapLabels";
+import { gapDisplayTitle, gapShortLabel } from "@/lib/gapLabels";
 import { engineTitle } from "@/lib/engineDisplay";
 import type { GapAnalysisRow } from "@/types/gapsAnalysis";
 import type { OpportunityRow } from "@/types/report";
@@ -107,11 +107,12 @@ function buildCopy(row: OpportunityRow) {
 /** Client-side analysis when `/gaps-analysis` is unavailable (unique per row). */
 export function buildGapAnalysisFromOpportunities(rows: OpportunityRow[]): GapAnalysisRow[] {
   return rows.map((row) => {
-    const title = row.title?.trim() || "(prompt)";
+    const promptRaw = row.title?.trim() || "";
+    const title = gapDisplayTitle(row, 512);
     const copy = buildCopy(row);
     return {
       opportunity_id: row.id,
-      title: title.length > 512 ? `${title.slice(0, 509)}…` : title,
+      title: promptRaw.length > 512 ? `${promptRaw.slice(0, 509)}…` : promptRaw || title,
       short_label: gapShortLabel(row),
       grade: row.grade,
       heat: row.heat,

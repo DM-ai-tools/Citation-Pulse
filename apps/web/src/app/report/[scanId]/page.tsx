@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CitationHeatmap } from "@/components/report/CitationHeatmap";
-import { DfyCta } from "@/components/report/DfyCta";
 import { EngineLayerSelector } from "@/components/report/EngineLayerSelector";
 import { HeatmapBreakdownCards } from "@/components/report/HeatmapBreakdownCards";
 import { PromptEngineScoreMatrix } from "@/components/report/PromptEngineScoreMatrix";
@@ -65,6 +64,7 @@ export default function ReportPage() {
   const scanId =
     typeof rawScanId === "string" ? rawScanId : Array.isArray(rawScanId) ? (rawScanId[0] ?? "") : "";
   const q = useReport(scanId);
+  const enriching = q.isEnriching;
   const [layer, setLayer] = useState<string | null>(null);
   const [competitorPromptId, setCompetitorPromptId] = useState<string | null>(null);
 
@@ -118,13 +118,13 @@ export default function ReportPage() {
   const embeddedMulti = q.data?.sov_multi_engine;
   const embeddedWeekly = q.data?.sov_multi_weekly_trend;
   const hasEmbeddedSov = isValidSovMultiPayload(embeddedMulti) && isValidSovWeeklyPayload(embeddedWeekly);
-  const fetchSovFromPublicScanApi = Boolean(scanId && brandIdForSov && !hasEmbeddedSov);
+  const fetchSovFromPublicScanApi = Boolean(scanId && brandIdForSov && !hasEmbeddedSov && !enriching);
 
   const sovBundle = useQuery({
-    queryKey: ["sov-summary", "scan", scanId, "84d", 12],
+    queryKey: ["sov-summary", "scan", scanId, "7d", 7],
     queryFn: async (): Promise<SovBundleResponse> => {
       const r = await apiFetch(
-        `/api/v1/scans/${encodeURIComponent(scanId)}/sov/summary?range=84d&weeks=12`,
+        `/api/v1/scans/${encodeURIComponent(scanId)}/sov/summary?range=7d&weeks=7`,
       );
       if (!r.ok) throw new Error(await r.text());
       return r.json();
@@ -225,49 +225,11 @@ export default function ReportPage() {
         />
       </div>
 
-      {sovReady && multiSov && weeklySov ? (
-        <div className="mx-auto max-w-[1280px] px-6 pt-7">
-          <BrandSovDashboard
-            variant="embedded"
-            brandName={brandName}
-            multi={multiSov}
-            weekly={weeklySov}
-            enginesOrder={engines}
-            engineControl={{ value: layer, onChange: setLayer }}
-          />
-        </div>
-      ) : sovPending ? (
-        <div className="mx-auto max-w-[1280px] px-6 pt-7">
-          <Skeleton className="h-[420px] w-full rounded-2xl" />
-        </div>
-      ) : (
-        <div className="mx-auto max-w-[1280px] px-6 pt-7">
-          <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
-          {sovFetchError ? (
-            <p className="mt-2 text-center text-xs text-amber-800">
-              Share of voice block could not load — heatmap filters below still work. If DevTools shows{" "}
-              <span className="font-mono">404</span>, redeploy the API so{" "}
-              <span className="font-mono">/api/v1/scans/…/sov/summary</span> exists, then hard-refresh.
-            </p>
-          ) : null}
-        </div>
-      )}
+      <div className="mx-auto max-w-[1280px] space-y-6 px-6 pt-6 pb-8">
+        <EngineLayerSelector engines={engines} value={layer} onChange={setLayer} scores={scores} />
 
-      {/* Full-width above the heatmap so Top gap opportunities matches /dashboard prominence and is not lost below the fold (prod users often scroll straight to citations). */}
-      <div className="mx-auto max-w-[1280px] space-y-5 px-6 pt-5">
-        <CompetitorDiscovery
-          id="competitor-discovery"
-          discovery={d.competitor_discovery}
-          userProvided={competitorRoster.userProvided}
-          analysisCompetitors={competitorRoster.analysis}
-          scanStatus={d.status}
-          pending={Boolean(d.competitor_discovery_pending)}
-        />
-        <TopGapOpportunities id="top-gap-opportunities" opportunities={d.opportunities ?? []} />
-      </div>
-
-      <div className="mx-auto grid max-w-[1280px] gap-6 px-6 py-6 pb-8 lg:grid-cols-[1.4fr_1fr] lg:items-start">
-        <div className="flex min-w-0 w-full flex-col gap-5 lg:col-span-1">
+        {/* a. Citation heatmap + prompt × engine score matrix */}
+        <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr] lg:items-start">
           <CitationHeatmap
             prompts={d.prompts}
             engines={engines}
@@ -278,34 +240,97 @@ export default function ReportPage() {
             title="Citation Heatmap"
             layerLabel={layer ? engineTitle(layer) : null}
           />
-          <HeatmapBreakdownCards
-            cells={breakdownCells}
-            layer={layer}
-            promptCount={d.prompts.length}
-            engineCount={d.engines.length}
-            citationScore={layerScore}
-          />
-        </div>
-        <div className="flex min-w-0 w-full flex-col gap-5 lg:col-span-1">
           <PromptEngineScoreMatrix prompts={d.prompts} engines={d.engines} cells={d.matrix.cells} />
-          <DfyCta />
         </div>
-        <div className="min-w-0 w-full lg:col-span-2">
-          <CompetitorEngineCitations
-            data={d.competitor_citation_visibility}
-            prompts={d.prompts}
-            selectedPromptId={competitorPromptId}
-            onPromptSelect={setCompetitorPromptId}
-            discoveryPending={Boolean(d.competitor_discovery_pending)}
-            discoveryFailed={
-              !d.competitor_discovery &&
-              !d.competitor_discovery_pending &&
-              (d.competitor_discovery_status === "failed" ||
-                d.competitor_discovery_status === "skipped")
-            }
-            discoveryValidatedCount={discoveryValidatedCount}
+
+        {/* b. Breakdown for all engines */}
+        <HeatmapBreakdownCards
+          cells={breakdownCells}
+          layer={layer}
+          promptCount={d.prompts.length}
+          engineCount={d.engines.length}
+          citationScore={layerScore}
+        />
+
+        {/* c. AI competitor landscape */}
+        <CompetitorDiscovery
+          id="competitor-discovery"
+          discovery={d.competitor_discovery}
+          userProvided={competitorRoster.userProvided}
+          analysisCompetitors={competitorRoster.analysis}
+          scanStatus={d.status}
+          pending={Boolean(d.competitor_discovery_pending)}
+        />
+
+        {/* d. Top gap opportunities (hidden until View details) */}
+        <TopGapOpportunities
+          id="top-gap-opportunities"
+          scanId={scanId}
+          opportunities={d.opportunities ?? []}
+        />
+
+        {/* e. Share of voice */}
+        {enriching && !sovReady ? (
+          <div>
+            <p className="mb-3 text-center text-sm text-tr-mute">Loading share of voice…</p>
+            <Skeleton className="h-[280px] w-full rounded-2xl" />
+          </div>
+        ) : null}
+        {sovReady && multiSov && weeklySov ? (
+          <BrandSovDashboard
+            variant="embedded"
+            brandName={brandName}
+            multi={multiSov}
+            weekly={weeklySov}
+            enginesOrder={engines}
+            engineControl={{ value: layer, onChange: setLayer }}
+            hideEngineStrip
           />
-        </div>
+        ) : sovPending && !enriching ? (
+          <Skeleton className="h-[420px] w-full rounded-2xl" />
+        ) : sovFetchError && !enriching ? (
+          <p className="text-center text-xs text-amber-800">
+            Share of voice could not load. Redeploy the API so{" "}
+            <span className="font-mono">/api/v1/scans/…/sov/summary</span> exists, then hard-refresh.
+          </p>
+        ) : null}
+
+        {/* f. Competitor citations by AI engine */}
+        <CompetitorEngineCitations
+          data={d.competitor_citation_visibility}
+          matrixCells={allCells}
+          engines={d.engines}
+          roster={[
+            ...competitorRoster.userProvided.map((c) => ({
+              domain: c.domain,
+              name: c.name,
+              userProvided: true,
+              level: c.level,
+              tier: c.tier,
+            })),
+            ...competitorRoster.analysis.map((c) => ({
+              domain: c.domain,
+              name: c.name,
+              level: c.level,
+              tier: c.tier,
+            })),
+          ]}
+          prompts={d.prompts}
+          selectedPromptId={competitorPromptId}
+          onPromptSelect={setCompetitorPromptId}
+          discoveryPending={Boolean(d.competitor_discovery_pending)}
+          discoveryFailed={
+            !d.competitor_discovery &&
+            !d.competitor_discovery_pending &&
+            (d.competitor_discovery_status === "failed" || d.competitor_discovery_status === "skipped")
+          }
+          userProvidedDomains={[
+            ...competitorRoster.userProvided.map((c) => c.domain),
+            ...(d.user_provided_competitors ?? []).map((c) => c.domain),
+          ]}
+          isLoading={q.isCitationsLoading}
+          fetchFailed={q.citationsFetchError}
+        />
       </div>
 
       <p className="pb-10 text-center text-[13px] text-tr-mute">

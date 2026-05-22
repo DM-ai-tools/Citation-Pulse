@@ -346,18 +346,20 @@ def canary_check() -> str:
 
 @celery_app.task(name="citationpulse.start_scan")
 def start_scan_task(scan_id: str) -> str:
-    """Run competitor landscape first, then fan out engine citation checks."""
+    """Fan out engine citation checks immediately; competitor landscape runs in parallel."""
     db = SessionLocal()
     try:
         from citationpulse.services.competitor_discovery_scan import (
             auto_discover_enabled,
-            run_competitor_discovery_for_scan,
             set_discovery_status,
         )
 
         scan = db.get(Scan, UUID(scan_id))
         if not scan:
             return "missing_scan"
+
+        # Engine runs first so the live scan matrix progresses immediately.
+        fan_out_scan_task(scan_id)
 
         if auto_discover_enabled(scan) and not scan.competitor_discovery:
             set_discovery_status(scan, "pending")
@@ -367,27 +369,42 @@ def start_scan_task(scan_id: str) -> str:
                 publish_scan_event(scan_id, {"type": "competitor.discovery.started"})
             except Exception:
                 _log.debug("competitor.discovery.started event failed scan_id=%s", scan_id)
+            try:
+                competitor_discovery_for_scan_task.delay(scan_id)
+            except Exception:
+                _log.exception("enqueue competitor_discovery failed scan_id=%s", scan_id)
+                set_discovery_status(scan, "failed")
+                db.commit()
 
-            result = run_competitor_discovery_for_scan(db, scan)
-            if not result and not scan.competitor_discovery:
-                params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
-                if params.get("discovery_status") == "pending":
-                    set_discovery_status(scan, "skipped")
-            db.commit()
-            if result is not None or scan.competitor_discovery:
-                try:
-                    publish_scan_event(scan_id, {"type": "competitor.discovery.ready"})
-                except Exception:
-                    _log.debug("competitor.discovery.ready event failed scan_id=%s", scan_id)
-
-        fan_out_scan_task.delay(scan_id)
         return "ok"
     except Exception:
         _log.exception("start_scan_task failed scan_id=%s", scan_id)
         try:
-            fan_out_scan_task.delay(scan_id)
+            fan_out_scan_task(scan_id)
         except Exception:
             _log.exception("fan_out fallback after start_scan failed scan_id=%s", scan_id)
+        return "error"
+    finally:
+        db.close()
+
+
+@celery_app.task(name="citationpulse.enrich_competitor_after_scan")
+def enrich_competitor_after_scan_task(scan_id: str) -> str:
+    """Post-scan competitor expansion (must not run inside engine ``asyncio.run``)."""
+    db = SessionLocal()
+    try:
+        from citationpulse.services.competitor_pipeline import (
+            enrich_competitor_discovery_after_scan_complete,
+        )
+
+        enrich_competitor_discovery_after_scan_complete(db, UUID(scan_id))
+        try:
+            publish_scan_event(scan_id, {"type": "competitor.discovery.ready"})
+        except Exception:
+            _log.debug("competitor.discovery.ready after enrich failed scan_id=%s", scan_id)
+        return "ok"
+    except Exception:
+        _log.exception("enrich_competitor_after_scan failed scan_id=%s", scan_id)
         return "error"
     finally:
         db.close()
@@ -411,7 +428,7 @@ def competitor_discovery_for_scan_task(scan_id: str) -> str:
             params = scan.discovery_params if isinstance(scan.discovery_params, dict) else {}
             # Do not overwrite explicit failures from analyze_competitors validation.
             if params.get("discovery_status") == "pending":
-                set_discovery_status(scan, "skipped")
+                set_discovery_status(scan, "failed")
         if result is not None or scan.competitor_discovery:
             from citationpulse.services.competitor_citation_visibility import reclassify_scan_citations
 

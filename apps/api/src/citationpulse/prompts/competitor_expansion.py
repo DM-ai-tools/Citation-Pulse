@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from citationpulse.constants.competitor_targets import (
+    EXPANSION_ONE_LEVEL_ABOVE_BATCH,
+    EXPANSION_SAME_LEVEL_BATCH,
+    ONE_LEVEL_ABOVE_COUNT,
+    SAME_LEVEL_COUNT,
+)
 from citationpulse.prompts.competitor_discovery import CompetitorType
 
 
@@ -40,12 +46,12 @@ def build_competitor_expansion_messages(
         )
     elif tiers == ["one_level_above"]:
         tier_focus = (
-            "FOCUS: one-tier-above competitors only (aspirational / market-leading, exactly ONE tier above target). "
+            "FOCUS: competitors ahead only (aspirational / market-leading, exactly ONE company tier above target). "
             "Use searches like: enterprise alternatives to X, market leaders in X category, premium providers in X."
         )
     else:
         tier_focus = (
-            "Balance output between same-tier (~50%) and one-tier-above (~50%). "
+            "Balance output between same-tier (~50%) and competitors ahead (~50%). "
             "Search patterns: companies similar to X, top competitors of X, best alternatives to X, "
             "enterprise alternatives to X, market leaders in X category."
         )
@@ -71,9 +77,9 @@ TIER EXPANSION FOCUS:
 {tier_focus}
 
 MINIMUM CITED TARGET (after engine re-check):
-- at least 2 same-tier competitors cited in ≥1 engine
-- at least 2 one-tier-above competitors cited in ≥1 engine
-Preferred: up to 3 per tier.
+- exactly {SAME_LEVEL_COUNT} same-tier competitors, each cited in ≥2 different AI engines
+- exactly {ONE_LEVEL_ABOVE_COUNT} competitors ahead, each cited in ≥2 different AI engines
+- total output must not exceed {SAME_LEVEL_COUNT + ONE_LEVEL_ABOVE_COUNT} competitors
 
 ALREADY TRACKED (must NOT repeat):
 {existing_block}
@@ -90,8 +96,8 @@ Requirements:
 Output JSON (same schema as initial discovery):
 {{
   "target_company": {{ copy from prior analysis or re-infer briefly }},
-  "same_level_competitors": [ up to 4 objects if same-tier needed ],
-  "one_level_above_competitors": [ up to 4 objects if one-tier-above needed ],
+  "same_level_competitors": [ up to {EXPANSION_SAME_LEVEL_BATCH} objects if same-tier needed ],
+  "one_level_above_competitors": [ up to {EXPANSION_ONE_LEVEL_ABOVE_BATCH} objects if competitors-ahead needed ],
   "validation_summary": {{
     "same_level_validated": 0,
     "one_level_above_validated": 0,

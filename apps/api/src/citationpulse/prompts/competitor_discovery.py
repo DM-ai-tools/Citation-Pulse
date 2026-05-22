@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import Literal
 
+from citationpulse.constants.competitor_targets import (
+    MIN_ENGINE_CITATIONS,
+    ONE_LEVEL_ABOVE_COUNT,
+    SAME_LEVEL_COUNT,
+    TOTAL_COMPETITOR_COUNT,
+)
+
 CompetitorType = Literal["niche_specialist", "full_stack_niche"]
 
 
@@ -18,6 +25,7 @@ def build_competitor_discovery_messages(
     market: str = "Australia",
 ) -> list[dict[str, str]]:
     """Return chat messages for Australian direct-competitor discovery (tiered JSON for the app)."""
+    initial_total = SAME_LEVEL_COUNT + ONE_LEVEL_ABOVE_COUNT
     excluded = excluded_competitors or []
     excluded_block = "\n".join(f"- {d}" for d in excluded) if excluded else "(none)"
     ctype_line = (
@@ -78,10 +86,10 @@ excluded_competitors (MUST NOT appear in output):
 {excluded_block}
 
 ==================================================
-COMPETITOR SELECTION LOGIC (internal research — then output 5+5)
+COMPETITOR SELECTION LOGIC (internal research — then output {SAME_LEVEL_COUNT}+{ONE_LEVEL_ABOVE_COUNT})
 ==================================================
 
-Research at least 12–15 strong Australian direct competitors internally, then select the best 10 for output.
+Research at least 8–10 strong Australian direct competitors internally, then select the best {initial_total} for output.
 
 IF BOTH service AND niche are provided:
 - Companies in {market} that offer the specified service AND clearly target the specified niche
@@ -118,15 +126,17 @@ Classify the target and each selected competitor into exactly ONE tier:
 - Tier 2 → Established Regional Competitor
 - Tier 3 → Premium / Multi-City Leader
 - Tier 4 → National Market Leader
+- Tier 5 → Enterprise / Global Category Leader (use when clearly above national scale)
+- Tier 6 → Platform / Conglomerate Leader (rare; only when evidence supports it)
 
 ==================================================
-OUTPUT COMPETITOR SET (project schema — NOT a flat array of 10)
+OUTPUT COMPETITOR SET (project schema — NOT a flat array)
 ==================================================
 
 From your research pool, output:
-- Exactly 6 competitors from the SAME company tier as the target → same_level_competitors
-- Exactly 6 competitors exactly ONE tier above the target → one_level_above_competitors
-(8–12 total; ~50% same-tier, ~50% one-tier-above; not enterprise outliers; not more than one tier jump.)
+- Exactly {SAME_LEVEL_COUNT} competitors from the SAME company tier as the target → same_level_competitors
+- Exactly {ONE_LEVEL_ABOVE_COUNT} competitors ahead of the target (one company tier up) → one_level_above_competitors
+({initial_total} total; ~50% same-tier, ~50% competitors ahead; prefer one tier step up, but if the target is Tier 4+ pick the next tier up to Tier 6 when real market leaders exist.)
 
 For each competitor provide citations (real URLs) supporting selection: homepage, service_page,
 location_page, about_page, seo_evidence, or ranking pages.
@@ -147,6 +157,9 @@ relevance_score (0.0–1.0) per citation. Use null for avg_position or intersect
 
 Rank competitors strongest-first within each list (rank 1 = best).
 
+IMPORTANT: Return ONLY {TOTAL_COMPETITOR_COUNT} competitors total ({SAME_LEVEL_COUNT} same-tier + {ONE_LEVEL_ABOVE_COUNT} competitors ahead).
+Do not include spare or alternate competitors in the JSON.
+
 ==================================================
 JSON SCHEMA (ONLY output this object)
 ==================================================
@@ -158,14 +171,14 @@ JSON SCHEMA (ONLY output this object)
     "detected_services": [],
     "detected_niche": "",
     "detected_locations": [],
-    "company_tier": "Tier 1|Tier 2|Tier 3|Tier 4",
+    "company_tier": "Tier 1|Tier 2|Tier 3|Tier 4|Tier 5|Tier 6",
     "tier_reasoning": ""
   }},
-  "same_level_competitors": [ exactly 5 objects, ordered strongest-first ],
-  "one_level_above_competitors": [ exactly 5 objects, ordered strongest-first ],
+  "same_level_competitors": [ exactly {SAME_LEVEL_COUNT} objects, ordered strongest-first ],
+  "one_level_above_competitors": [ exactly {ONE_LEVEL_ABOVE_COUNT} objects, ordered strongest-first ],
   "validation_summary": {{
-    "same_level_validated": 5,
-    "one_level_above_validated": 5,
+    "same_level_validated": {SAME_LEVEL_COUNT},
+    "one_level_above_validated": {ONE_LEVEL_ABOVE_COUNT},
     "citations_verified": true,
     "excluded_domains_removed": true,
     "notes": ""
@@ -190,7 +203,7 @@ Each same_level_competitor:
   ]
 }}
 
-Each one_level_above_competitor:
+Each competitors-ahead row (one_level_above_competitor):
 {{
   "domain": "",
   "name": "",
@@ -204,7 +217,7 @@ Each one_level_above_competitor:
 }}
 
 RULES:
-- ONLY JSON · exactly 5 same_level_competitors · exactly 5 one_level_above_competitors
+- ONLY JSON · exactly {SAME_LEVEL_COUNT} same_level_competitors · exactly {ONE_LEVEL_ABOVE_COUNT} one_level_above_competitors
 - real URLs only · null for unknown metrics · never include excluded domains
 - prefer strong SEO-visible Australian providers"""
 

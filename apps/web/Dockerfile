@@ -7,7 +7,7 @@ COPY . /ctx
 
 RUN set -eux; \
     if [ -f /ctx/apps/web/package.json ]; then \
-      cp /ctx/package.json /ctx/package-lock.json /app/; \
+      cp /ctx/package.json /ctx/package-lock.json /app/ 2>/dev/null || true; \
       mkdir -p /app/apps/web; \
       cp /ctx/apps/web/package.json /app/apps/web/package.json; \
       if [ -d /ctx/packages ]; then cp -r /ctx/packages /app/packages; fi; \
@@ -51,6 +51,7 @@ RUN set -eux; \
 COPY --from=deps /app/node_modules ./node_modules
 
 RUN set -eux; \
+    if [ -f /app/apps/web/package.json ]; then WEB=/app/apps/web; else WEB=/app; fi; \
     if [ -z "${NEXT_PUBLIC_API_URL:-}" ]; then \
       echo "CitationPulse WARNING: NEXT_PUBLIC_API_URL is empty during docker build."; \
     else \
@@ -62,25 +63,26 @@ RUN set -eux; \
     fi; \
     if [ -f /app/apps/web/package.json ]; then \
       npm run build -w citationpulse-web; \
-      mkdir -p /out; \
-      cp -r /app/apps/web/.next /out/.next; \
-      cp /app/apps/web/package.json /out/package.json; \
     else \
-      npm run build; \
-      mkdir -p /out; \
-      cp -r /app/.next /out/.next; \
-      cp /app/package.json /out/package.json; \
-    fi
+      cd "$WEB" && npm run build; \
+    fi; \
+    mkdir -p /out; \
+    cp -r "$WEB/.next" /out/.next; \
+    cp "$WEB/package.json" /out/package.json; \
+    cp "$WEB/next.config.ts" /out/next.config.ts; \
+    if [ -f "$WEB/next.config.mjs" ]; then cp "$WEB/next.config.mjs" /out/next.config.mjs; fi; \
+    if [ -f "$WEB/next.config.js" ]; then cp "$WEB/next.config.js" /out/next.config.js; fi; \
+    if [ -d "$WEB/public" ]; then cp -r "$WEB/public" /out/public; else mkdir -p /out/public; fi
 
-FROM node:22-alpine
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
-COPY --from=build /out/.next ./.next
-COPY --from=build /out/package.json ./package.json
+COPY --from=build /out/ ./
 COPY --from=build /app/node_modules ./node_modules
 
 RUN npm prune --omit=dev 2>/dev/null || true

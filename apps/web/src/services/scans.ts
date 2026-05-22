@@ -36,8 +36,23 @@ export async function getScan(scanId: string): Promise<ScanSnapshot> {
   return r.json();
 }
 
-export async function getScanReport(scanId: string): Promise<ReportData> {
-  const r = await apiFetch(`/api/v1/scans/${scanId}/report`);
+export async function getScanReport(scanId: string, options?: { lite?: boolean }): Promise<ReportData> {
+  const lite = options?.lite ? "?lite=true" : "";
+  const r = await apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}/report${lite}`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export type CompetitorCitationsPayload = {
+  competitor_citation_visibility: ReportData["competitor_citation_visibility"];
+  competitor_discovery: ReportData["competitor_discovery"];
+  competitor_discovery_pending?: boolean;
+  validation_complete?: boolean;
+};
+
+/** Lightweight poll target while full report (SoV) loads. */
+export async function getScanCompetitorCitations(scanId: string): Promise<CompetitorCitationsPayload> {
+  const r = await apiFetch(`/api/v1/scans/${encodeURIComponent(scanId)}/competitor-citations`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }

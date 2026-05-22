@@ -44,6 +44,37 @@ export type MultiWeeklyResponse = {
 
 const BRAND_TEAL = "#0d9488";
 const COMP_COLORS = ["#1e3a5f", "#64748b", "#94a3b8", "#cbd5e1"];
+/** SoV trend: seven daily buckets across the past week. */
+const TREND_DAYS = 7;
+
+function normalizeToSevenDaySeries(
+  series: MultiWeeklyResponse["series"],
+): MultiWeeklyResponse["series"] {
+  if (!series.length) return [];
+  const sorted = [...series].sort((a, b) => a.week_start.localeCompare(b.week_start));
+  if (sorted.length >= TREND_DAYS) return sorted.slice(-TREND_DAYS);
+
+  const last = sorted[sorted.length - 1];
+  const end = new Date(`${last.week_start.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(end.getTime())) return sorted;
+
+  const byDate = new Map(sorted.map((r) => [r.week_start.slice(0, 10), r]));
+  const out: MultiWeeklyResponse["series"] = [];
+  for (let i = TREND_DAYS - 1; i >= 0; i--) {
+    const d = new Date(end);
+    d.setUTCDate(d.getUTCDate() - i);
+    const iso = d.toISOString().slice(0, 10);
+    const hit = byDate.get(iso);
+    out.push(
+      hit ?? {
+        week_start: iso,
+        shares: {},
+        tracked_citations: 0,
+      },
+    );
+  }
+  return out;
+}
 
 function chipBadgeClass(pct: number) {
   if (pct >= 60) return "bg-emerald-500 text-white";
@@ -51,12 +82,11 @@ function chipBadgeClass(pct: number) {
   return "bg-rose-500 text-white";
 }
 
-/** X labels: W1 … Wn-1, then `now` for the latest week in the window. */
+/** X labels: short dates; latest point labeled `now` when window is a week. */
 function weekAxisLabel(idx: number, total: number, weekStartIso?: string) {
-  if (total <= 1) return weekStartIso ? formatWeekTick(weekStartIso) : "now";
-  if (idx === total - 1) return "now";
+  if (idx === total - 1 && total > 1) return "now";
   if (weekStartIso) return formatWeekTick(weekStartIso);
-  return `W${idx + 1}`;
+  return idx === total - 1 ? "now" : `D${idx + 1}`;
 }
 
 function formatWeekTick(iso: string) {
@@ -122,8 +152,11 @@ export function BrandSovDashboard(props: {
   enginesOrder?: string[];
   /** Sync engine strip with parent (heatmap layer on report). */
   engineControl?: { value: string | null; onChange: (v: string | null) => void };
+  /** Hide duplicate engine chips when the report already shows `EngineLayerSelector`. */
+  hideEngineStrip?: boolean;
 }) {
-  const { multi, weekly, brandName, variant = "page", chipScores, enginesOrder, engineControl } = props;
+  const { multi, weekly, brandName, variant = "page", chipScores, enginesOrder, engineControl, hideEngineStrip } =
+    props;
   const fillGradId = useId().replace(/:/g, "");
   const [localLayer, setLocalLayer] = useState<string | null>(null);
 
@@ -139,9 +172,11 @@ export function BrandSovDashboard(props: {
     else setLocalLayer(eng);
   };
 
+  const trendSeries = useMemo(() => normalizeToSevenDaySeries(weekly.series ?? []), [weekly.series]);
+
   const chartRows = useMemo(() => {
     const ents = weekly.entities ?? [];
-    const s = weekly.series ?? [];
+    const s = trendSeries;
     return s.map((row, idx) => {
       const out: Record<string, string | number> = {
         week: weekAxisLabel(idx, s.length, row.week_start),
@@ -152,24 +187,24 @@ export function BrandSovDashboard(props: {
       }
       return out;
     });
-  }, [weekly.entities, weekly.series]);
+  }, [weekly.entities, trendSeries]);
 
-  const trendShowDots = chartRows.length < 2;
+  const trendShowDots = chartRows.length <= TREND_DAYS;
 
   const lastBrandPct = useMemo(() => {
-    const s = weekly.series ?? [];
+    const s = trendSeries;
     if (!s.length || !primary) return 0;
     const last = s[s.length - 1];
     return Math.round(pickWeeklyShare(last.shares, primary.entity_id) * 100);
-  }, [weekly.series, primary]);
+  }, [trendSeries, primary]);
 
   const deltaPp = useMemo(() => {
-    const s = weekly.series ?? [];
+    const s = trendSeries;
     if (!primary || s.length < 2) return null;
     const a = pickWeeklyShare(s[s.length - 2].shares, primary.entity_id) * 100;
     const b = pickWeeklyShare(s[s.length - 1].shares, primary.entity_id) * 100;
     return Math.round((b - a) * 10) / 10;
-  }, [weekly.series, primary]);
+  }, [trendSeries, primary]);
 
   const barData = useMemo(() => {
     if (!primary) return [];
@@ -210,61 +245,63 @@ export function BrandSovDashboard(props: {
 
   const card = (
     <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_8px_40px_rgba(15,23,42,0.06)]">
-      <div className="border-b border-slate-200 bg-gradient-to-b from-slate-50 to-white px-6 py-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="font-display text-[11px] font-extrabold uppercase tracking-[0.14em] text-slate-800">
-            Engine layer
-          </span>
-          <span className="h-0.5 w-7 rounded-full bg-sky-500" aria-hidden />
-        </div>
-        <p className="mt-1.5 text-[12.5px] leading-snug text-slate-500">
-          <span className="text-slate-400">—</span> Click an engine to change the heatmap layer.
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-          {engineControl && engineControl.value !== null ? (
-            <button
-              type="button"
-              onClick={() => setEngine(null)}
-              className="text-[11px] font-semibold text-sky-700 underline decoration-sky-400 underline-offset-2 hover:text-sky-900"
-            >
-              All engines in heatmap
-            </button>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-          {engines.map((eng) => {
-            const sharePct = Math.round(pickEngineShare(primary?.shares_by_engine ?? {}, eng) * 100);
-            const chip =
-              chipScores != null && Object.prototype.hasOwnProperty.call(chipScores, eng)
-                ? Math.round(chipScores[eng] ?? 0)
-                : sharePct;
-            const selected = highlight === eng;
-            return (
+      {!hideEngineStrip ? (
+        <div className="border-b border-slate-200 bg-gradient-to-b from-slate-50 to-white px-6 py-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-display text-[11px] font-extrabold uppercase tracking-[0.14em] text-slate-800">
+              Engine layer
+            </span>
+            <span className="h-0.5 w-7 rounded-full bg-sky-500" aria-hidden />
+          </div>
+          <p className="mt-1.5 text-[12.5px] leading-snug text-slate-500">
+            <span className="text-slate-400">—</span> Click an engine to change the heatmap layer.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+            {engineControl && engineControl.value !== null ? (
               <button
-                key={eng}
                 type="button"
-                onClick={() => setEngine(eng)}
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-semibold transition",
-                  selected
-                    ? "border-slate-900 bg-slate-900 text-white shadow-sm"
-                    : "border-slate-200 bg-white text-slate-800 hover:border-slate-300",
-                )}
+                onClick={() => setEngine(null)}
+                className="text-[11px] font-semibold text-sky-700 underline decoration-sky-400 underline-offset-2 hover:text-sky-900"
               >
-                <span>{engineTitle(eng)}</span>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums",
-                    selected ? "bg-white/20 text-white" : chipBadgeClass(chip),
-                  )}
-                >
-                  {chip}
-                </span>
+                All engines in heatmap
               </button>
-            );
-          })}
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {engines.map((eng) => {
+                const sharePct = Math.round(pickEngineShare(primary?.shares_by_engine ?? {}, eng) * 100);
+                const chip =
+                  chipScores != null && Object.prototype.hasOwnProperty.call(chipScores, eng)
+                    ? Math.round(chipScores[eng] ?? 0)
+                    : sharePct;
+                const selected = highlight === eng;
+                return (
+                  <button
+                    key={eng}
+                    type="button"
+                    onClick={() => setEngine(eng)}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-semibold transition",
+                      selected
+                        ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                        : "border-slate-200 bg-white text-slate-800 hover:border-slate-300",
+                    )}
+                  >
+                    <span>{engineTitle(eng)}</span>
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums",
+                        selected ? "bg-white/20 text-white" : chipBadgeClass(chip),
+                      )}
+                    >
+                      {chip}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="px-6 pb-2 pt-5">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
@@ -272,7 +309,7 @@ export function BrandSovDashboard(props: {
             Share of voice · {brandName.toUpperCase()} vs. competitors
           </h2>
           <p className="shrink-0 text-right text-[12px] font-medium lowercase text-slate-500">
-            last {weekly.weeks} weeks · all engines
+            past 7 days · all engines
           </p>
         </div>
 
@@ -280,7 +317,7 @@ export function BrandSovDashboard(props: {
           <div>
             <h3 className="font-display text-sm font-bold text-slate-900">SoV trend</h3>
             <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-              % of all brand + competitor citations belonging to {brandName}, per week
+              % of all brand + competitor citations belonging to {brandName}, past 7 days (linear trend)
             </p>
             <div className="mt-4 h-[280px] w-full min-w-0">
               {chartRows.length === 0 ? (
@@ -358,14 +395,14 @@ export function BrandSovDashboard(props: {
                       return (
                         <Line
                           key={e.entity_id}
-                          type="monotone"
+                          type="linear"
                           dataKey={e.entity_id}
                           name={e.name}
                           stroke={stroke}
                           strokeWidth={isBrand ? 2.4 : 2}
                           strokeDasharray={isBrand ? undefined : "6 4"}
                           dot={trendShowDots ? { r: isBrand ? 5 : 4, strokeWidth: 0, fill: stroke } : false}
-                          activeDot={{ r: 4 }}
+                          activeDot={{ r: 5 }}
                           isAnimationActive={false}
                           connectNulls
                         />
@@ -425,12 +462,12 @@ export function BrandSovDashboard(props: {
           </p>
         </div>
         <div>
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brand citations (12w)</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brand citations (7d)</span>
           <p className="font-display text-lg font-black tabular-nums text-slate-900">{totals?.brand_citations ?? "—"}</p>
         </div>
         <div>
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Competitor citations (12w)
+            Competitor citations (7d)
           </span>
           <p className="font-display text-lg font-black tabular-nums text-slate-900">
             {totals?.competitor_citations ?? "—"}
@@ -451,7 +488,7 @@ export function BrandSovDashboard(props: {
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          <Link href="/dashboard" className="text-[#0d9488] hover:underline">
+          <Link href="/dashboard/gaps" className="text-[#0d9488] hover:underline">
             Dashboard
           </Link>
           <span className="mx-2 text-slate-300">/</span>

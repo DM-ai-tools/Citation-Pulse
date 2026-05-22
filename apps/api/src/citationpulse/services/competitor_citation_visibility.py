@@ -17,16 +17,22 @@ from citationpulse.models.domain import (
     RunStatus,
     Scan,
 )
+from citationpulse.constants.competitor_targets import (
+    MIN_ENGINE_CITATIONS,
+    ONE_LEVEL_ABOVE_COUNT,
+    SAME_LEVEL_COUNT,
+    TOTAL_COMPETITOR_COUNT,
+)
 from citationpulse.services.normalization import registrable_domain
 from citationpulse.services.ownership import classify_domain
 
 # Tier-balanced cited competitors (expansion loop + UI display).
-TARGET_SAME_TIER_MIN = 2
-TARGET_ABOVE_TIER_MIN = 2
-TARGET_SAME_TIER_MAX = 3
-TARGET_ABOVE_TIER_MAX = 3
-DISPLAY_MIN_COMPETITORS = TARGET_SAME_TIER_MIN + TARGET_ABOVE_TIER_MIN
-DISPLAY_MAX_COMPETITORS = TARGET_SAME_TIER_MAX + TARGET_ABOVE_TIER_MAX
+TARGET_SAME_TIER_MIN = SAME_LEVEL_COUNT
+TARGET_ABOVE_TIER_MIN = ONE_LEVEL_ABOVE_COUNT
+TARGET_SAME_TIER_MAX = SAME_LEVEL_COUNT
+TARGET_ABOVE_TIER_MAX = ONE_LEVEL_ABOVE_COUNT
+DISPLAY_MIN_COMPETITORS = TOTAL_COMPETITOR_COUNT
+DISPLAY_MAX_COMPETITORS = TOTAL_COMPETITOR_COUNT
 
 
 def reclassify_scan_citations(db: Session, scan: Scan) -> int:
@@ -183,8 +189,16 @@ def _collect_engine_citations_from_db(
     engines: list[str],
     prompt_id: str | None = None,
     tracked_competitor_domains: set[str] | None = None,
+    include_non_brand: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
-    """All persisted citations for this scan (not limited to 8 per matrix cell)."""
+    """
+    All persisted citations for this scan (not limited to 8 per matrix cell).
+
+    ``include_non_brand`` widens the filter: anything not tagged as the user's own brand
+    qualifies as a competitor-candidate citation. This avoids the empty-card edge case
+    where comparison-style prompts cite review/news sites that aren't pre-tagged or in
+    the tracked set.
+    """
     tracked = _expand_tracked_domains(tracked_competitor_domains or set())
     engine_set = set(engines)
     by_domain: dict[str, list[dict[str, Any]]] = {}
@@ -204,14 +218,16 @@ def _collect_engine_citations_from_db(
             dom = (c.domain or registrable_domain(url)).lower()
             if not url or not dom:
                 continue
-            tagged = str(c.ownership or "") == Ownership.COMPETITOR.value
+            own = str(c.ownership or "")
+            tagged = own == Ownership.COMPETITOR.value
             on_tracked = dom in tracked
-            if not tagged and not on_tracked:
+            non_brand_candidate = include_non_brand and own != Ownership.BRAND.value
+            if not tagged and not on_tracked and not non_brand_candidate:
                 continue
             hit = {
                 "engine": eng,
                 "url": url,
-                "ownership": str(c.ownership or "neutral"),
+                "ownership": own or "neutral",
                 "position": int(c.position) if c.position is not None else None,
                 "snippet": (c.snippet or "")[:300] or None,
             }
@@ -271,9 +287,18 @@ def _collect_engine_citations_for_visibility(
     engines: list[str],
     prompt_id: str | None,
     tracked_competitor_domains: set[str],
+    include_non_brand: bool = True,
+    own_brand_domains: set[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Merge full DB citations with matrix cells (cells are capped at 8 URLs each)."""
+    """
+    Merge full DB citations with matrix cells (cells are capped at 8 URLs each).
+
+    ``include_non_brand=True`` (default) ensures the visibility card shows AI-cited
+    third-party/neutral URLs as competitor candidates so the card never goes empty
+    when the user's listed competitors weren't directly cited.
+    """
     tracked = _expand_tracked_domains(tracked_competitor_domains)
+    own = {d.lower() for d in (own_brand_domains or set()) if d}
     engine_by_domain: dict[str, list[dict[str, Any]]] = {}
     if db is not None and scan is not None:
         engine_by_domain = _collect_engine_citations_from_db(
@@ -282,6 +307,7 @@ def _collect_engine_citations_for_visibility(
             engines=engines,
             prompt_id=prompt_id,
             tracked_competitor_domains=tracked,
+            include_non_brand=include_non_brand,
         )
     from_cells = _collect_engine_citations(
         cells,
@@ -302,6 +328,44 @@ def _collect_engine_citations_for_visibility(
     for dom, hits in broad_cells.items():
         if dom in tracked:
             engine_by_domain = _merge_citation_hits(engine_by_domain, {dom: hits})
+        elif include_non_brand and dom not in own:
+            own_brand_hit = any(
+                str(h.get("ownership") or "") == Ownership.BRAND.value for h in hits
+            )
+            if not own_brand_hit:
+                engine_by_domain = _merge_citation_hits(engine_by_domain, {dom: hits})
+
+    # Matrix sync: same cells as the citation heatmap (status ``comp`` = competitor cited).
+    for cell in cells:
+        if prompt_id is not None and str(cell.get("promptId") or "") != prompt_id:
+            continue
+        eng = str(cell.get("engine") or "")
+        if eng and eng not in set(engines):
+            continue
+        st = str(cell.get("status") or "")
+        if st not in ("comp", "cited", "none"):
+            continue
+        is_comp = st == "comp"
+        for c in cell.get("citations") or []:
+            if not isinstance(c, dict):
+                continue
+            url = str(c.get("url") or "").strip()
+            dom = registrable_domain(url) if url else ""
+            if not url or not dom or dom in own:
+                continue
+            own_tag = str(c.get("ownership") or "")
+            if own_tag == Ownership.BRAND.value:
+                continue
+            if not is_comp and own_tag != Ownership.COMPETITOR.value:
+                continue
+            hit = {
+                "engine": eng,
+                "url": url,
+                "ownership": own_tag or "neutral",
+                "position": c.get("position"),
+                "snippet": (c.get("snippet") or "")[:300] or None,
+            }
+            engine_by_domain = _merge_citation_hits(engine_by_domain, {dom: [hit]})
     return engine_by_domain
 
 
@@ -324,19 +388,10 @@ def _visibility_score(
 
 
 def _is_valid_cited_competitor(row: dict[str, Any]) -> bool:
-    """Cited by ≥1 engine with non-empty citation data (never show zero-citation rows)."""
-    if not row.get("cited_by_engines"):
-        return False
-    hits = row.get("engine_citations")
-    if isinstance(hits, list) and len(hits) > 0:
-        return True
-    cite_count = row.get("citation_count")
-    if isinstance(cite_count, int) and cite_count > 0:
-        return True
-    by_eng = row.get("citations_by_engine")
-    if isinstance(by_eng, dict):
-        return any(isinstance(v, list) and len(v) > 0 for v in by_eng.values())
-    return False
+    """Per-prompt: ≥ ``MIN_ENGINE_CITATIONS`` distinct AI engines (strict display rules)."""
+    from citationpulse.services.competitor_final_selection import meets_strict_ai_engine_threshold
+
+    return meets_strict_ai_engine_threshold(row)
 
 
 def _display_sort_key(row: dict[str, Any]) -> tuple[float | int | str, ...]:
@@ -492,26 +547,27 @@ def _display_cited_competitors(
     max_above: int = TARGET_ABOVE_TIER_MAX,
 ) -> list[dict[str, Any]]:
     """
-    UI list: cited competitors only, tier-balanced (up to 3 same-tier + 3 one-level-above).
-
-    User-provided competitors are included when cited, after tier slots are filled.
+    UI list: exactly up to 2+2 competitors that pass strict multi-AI rules on this prompt.
     """
-    dmap = discovery_map or {}
-    valid = [_apply_discovery_level(r, dmap) for r in ranked if _is_valid_cited_competitor(r)]
-    valid.sort(key=_display_sort_key)
+    from citationpulse.services.competitor_final_selection import (
+        select_final_competitors,
+        verify_final_competitors,
+    )
 
-    same = [r for r in valid if r.get("level") == "same_level"]
-    above = [r for r in valid if r.get("level") == "one_level_above"]
-    user = [r for r in valid if r.get("level") == "user_provided"]
-    other = [
-        r
-        for r in valid
-        if r.get("level") not in ("same_level", "one_level_above", "user_provided")
-    ]
+    dmap = discovery_map or {}
+    pool = [_apply_discovery_level(r, dmap) for r in ranked if _is_valid_cited_competitor(r)]
+    selected = select_final_competitors(
+        pool,
+        dmap,
+        max_same=max_same,
+        max_above=max_above,
+        allow_tier_fill=False,
+    )
+    if not verify_final_competitors(selected).get("ok"):
+        return []
 
     out: list[dict[str, Any]] = []
-
-    def append_row(row: dict[str, Any]) -> None:
+    for row in selected:
         r = dict(row)
         r["visibility_rank"] = len(out) + 1
         _sanitize_cited_engines(r)
@@ -519,18 +575,47 @@ def _display_cited_competitors(
         if r.get("cited_engines"):
             out.append(r)
 
-    for row in same[:max_same]:
-        append_row(row)
-    for row in above[:max_above]:
-        append_row(row)
-    for row in user + other:
-        if len(out) >= DISPLAY_MAX_COMPETITORS:
-            break
-        if row["domain"] in {x["domain"] for x in out}:
-            continue
-        append_row(row)
+    return out[:DISPLAY_MAX_COMPETITORS]
 
-    return out
+
+def _display_user_provided_cited(
+    ranked: list[dict[str, Any]],
+    *,
+    fallback_limit: int = 6,
+) -> list[dict[str, Any]]:
+    """
+    UI list: user-entered companies cited on this prompt (any engine).
+    Falls back to top cited competitors when none of the user's companies were cited,
+    so the section reflects real engine output rather than appearing empty.
+    """
+
+    def _enrich(row: dict[str, Any], rank: int) -> dict[str, Any] | None:
+        r = dict(row)
+        r["visibility_rank"] = rank
+        _sanitize_cited_engines(r)
+        r["cited_engines_detail"] = _engine_positions_from_row(r)
+        return r if r.get("cited_engines") else None
+
+    user_rows: list[dict[str, Any]] = []
+    for row in ranked:
+        if not row.get("user_provided") or not row.get("cited_by_engines"):
+            continue
+        enriched = _enrich(row, len(user_rows) + 1)
+        if enriched:
+            user_rows.append(enriched)
+    if user_rows:
+        return user_rows
+
+    fallback: list[dict[str, Any]] = []
+    for row in ranked:
+        if not row.get("cited_by_engines"):
+            continue
+        enriched = _enrich(row, len(fallback) + 1)
+        if enriched:
+            fallback.append(enriched)
+        if len(fallback) >= fallback_limit:
+            break
+    return fallback
 
 
 def _build_visibility_payload(
@@ -538,15 +623,18 @@ def _build_visibility_payload(
     competitor_map: dict[str, dict[str, Any]],
     discovery_map: dict[str, dict[str, Any]],
     user_map: dict[str, dict[str, Any]],
+    competitor_discovery: dict[str, Any] | None,
     cells: list[dict[str, Any]],
     engines: list[str],
     prompt_text: str,
     prompt_id: str | None = None,
     db: Session | None = None,
     scan: Scan | None = None,
+    own_brand_domains: set[str] | None = None,
 ) -> dict[str, Any]:
     """Rank discovery + user-provided competitors against engine citations."""
     tracked_domains = set(competitor_map.keys())
+    own = {d.lower() for d in (own_brand_domains or set()) if d}
     engine_by_domain = _collect_engine_citations_for_visibility(
         db=db,
         scan=scan,
@@ -554,7 +642,12 @@ def _build_visibility_payload(
         engines=engines,
         prompt_id=prompt_id,
         tracked_competitor_domains=tracked_domains,
+        include_non_brand=True,
+        own_brand_domains=own,
     )
+    # Strip out the user's own brand domains in case they slipped through (defence-in-depth).
+    if own:
+        engine_by_domain = {d: hits for d, hits in engine_by_domain.items() if d not in own}
     # Include every competitor domain engines cited for this prompt (no fetch cap).
     all_domains = set(competitor_map.keys()) | set(engine_by_domain.keys())
     total_engines = max(1, len(engines))
@@ -629,10 +722,17 @@ def _build_visibility_payload(
     for i, row in enumerate(ranked, start=1):
         row["visibility_rank"] = i
 
+    validation_complete = False
+    if isinstance(competitor_discovery, dict):
+        vs = competitor_discovery.get("validation_summary")
+        if isinstance(vs, dict):
+            validation_complete = bool(vs.get("validation_complete"))
+
     discovery_only = [r for r in ranked if not r["cited_by_engines"]]
-    display_competitors = _display_cited_competitors(ranked, discovery_map=discovery_map)
+    # Report UI: show engine citations for user-provided competitors only (no strict 2+2 gate).
+    display_competitors = _display_user_provided_cited(ranked)
     tier_balance = _tier_balance_meta(
-        [_apply_discovery_level(r, discovery_map) for r in ranked if r.get("cited_by_engines")]
+        [_apply_discovery_level(r, discovery_map) for r in ranked if _is_valid_cited_competitor(r)]
     )
     user_provided_rows = [
         {"domain": r["domain"], "name": r["name"]}
@@ -663,6 +763,9 @@ def _build_visibility_payload(
         "display_max_limit": DISPLAY_MAX_COMPETITORS,
         "total_cited_pool": sum(1 for r in ranked if r.get("cited_by_engines")),
         "tier_balance": tier_balance,
+        "validation_complete": validation_complete,
+        "display_ready": len(display_competitors) > 0,
+        "display_mode": "user_provided_citations",
     }
     if prompt_id:
         out["prompt_id"] = prompt_id
@@ -689,15 +792,27 @@ def build_competitor_citation_visibility(
     user_map = _user_provided_competitor_map(db, brand)
     competitor_map = _merge_competitor_source_maps(discovery_map, user_map)
     prompt_rows = [p for p in (prompts or []) if isinstance(p, dict) and p.get("id")]
+    own_domains: set[str] = set()
+    brand_domains = getattr(brand, "domains", None) if brand else None
+    if brand_domains:
+        for d in brand_domains:
+            ds = str(d or "").strip().lower()
+            if ds:
+                own_domains.add(ds)
+                reg = registrable_domain(ds if ds.startswith("http") else f"https://{ds}")
+                if reg:
+                    own_domains.add(reg)
 
     payload_kw = dict(
         competitor_map=competitor_map,
         discovery_map=discovery_map,
         user_map=user_map,
+        competitor_discovery=competitor_discovery,
         cells=cells,
         engines=engines,
         db=db,
         scan=scan,
+        own_brand_domains=own_domains,
     )
 
     by_prompt: list[dict[str, Any]] = []
@@ -713,8 +828,14 @@ def build_competitor_citation_visibility(
             )
         )
 
-    prompt_text = str((prompt_rows[0] or {}).get("text") or "") if prompt_rows else ""
-    result = _build_visibility_payload(**payload_kw, prompt_text=prompt_text)
+    first_prompt = prompt_rows[0] if prompt_rows else None
+    prompt_text = str((first_prompt or {}).get("text") or "")
+    first_pid = str(first_prompt.get("id") or "") if first_prompt else None
+    result = _build_visibility_payload(
+        **payload_kw,
+        prompt_text=prompt_text,
+        prompt_id=first_pid,
+    )
     if by_prompt:
         result["by_prompt"] = by_prompt
     return result

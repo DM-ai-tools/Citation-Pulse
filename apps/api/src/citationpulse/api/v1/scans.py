@@ -22,6 +22,7 @@ from citationpulse.services.brand_dashboard import parse_range_days
 from citationpulse.services.competitor_discovery_scan import discovery_params_from_body
 from citationpulse.services.scans_flow import (
     available_engines,
+    build_scan_competitor_citations,
     build_scan_report,
     build_scan_snapshot,
 )
@@ -206,10 +207,41 @@ def _empty_weekly_from_multi(multi: dict[str, object], weeks: int) -> dict[str, 
 
 
 @secured_router.get("/{scan_id}/report")
-def get_scan_report(scan_id: UUID, db: DbSession, tenant: CurrentTenant):
+def get_scan_report(
+    scan_id: UUID,
+    db: DbSession,
+    tenant: CurrentTenant,
+    response: Response,
+    lite: bool = Query(False, description="Fast core payload (matrix + opportunities); skip SoV and heavy competitor rebuild"),
+):
     scan = _get_scan(db, scan_id)
     _assert_scan_tenant(scan, tenant)
-    return build_scan_report(db, scan)
+    if scan.status == "completed":
+        response.headers["Cache-Control"] = "private, max-age=15" if lite else "private, max-age=60"
+    return build_scan_report(db, scan, lite=lite)
+
+
+@secured_router.get("/{scan_id}/competitor-citations")
+def get_scan_competitor_citations(
+    scan_id: UUID,
+    db: DbSession,
+    tenant: CurrentTenant,
+    response: Response,
+):
+    """Fast competitor × engine citation block (uses on-scan cache when valid)."""
+    scan = _get_scan(db, scan_id)
+    _assert_scan_tenant(scan, tenant)
+    if scan.status == "completed":
+        response.headers["Cache-Control"] = "private, max-age=10"
+    payload = build_scan_competitor_citations(db, scan)
+    if payload is None:
+        return {
+            "competitor_citation_visibility": None,
+            "competitor_discovery": scan.competitor_discovery,
+            "competitor_discovery_pending": False,
+            "validation_complete": False,
+        }
+    return payload
 
 
 @secured_router.get("/{scan_id}/sov/multi-engine")
@@ -308,13 +340,20 @@ def share_scan(scan_id: UUID, db: DbSession, tenant: CurrentTenant, body: ShareB
 
 
 @router.get("/public/{token}")
-def get_public_scan(token: str, db: DbSession):
+def get_public_scan(
+    token: str,
+    db: DbSession,
+    response: Response,
+    lite: bool = Query(False),
+):
     scan = db.scalar(
         select(Scan).where(Scan.share_token == token, Scan.share_public.is_(True)),
     )
     if not scan:
         raise HTTPException(status_code=404, detail="Report not found")
-    return build_scan_report(db, scan)
+    if scan.status == "completed":
+        response.headers["Cache-Control"] = "private, max-age=15" if lite else "private, max-age=60"
+    return build_scan_report(db, scan, lite=lite)
 
 
 async def _sse_gen(scan_id: UUID):

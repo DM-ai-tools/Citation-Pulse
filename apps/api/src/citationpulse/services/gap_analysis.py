@@ -69,7 +69,7 @@ def _short_label(ctx: OpportunityDetailContext) -> str:
         "refresh_content": f"Visibility lost on {engine}" if engine else "Citation refresh needed",
         "extend_presence": f"Extend presence on {engine}" if engine else "Partial engine coverage",
     }
-    return labels.get(ctx.gap_type, f"{ctx.heat} priority gap")
+    return labels.get(ctx.gap_type, "Visibility gap")
 
 
 def _affected_engines(ctx: OpportunityDetailContext) -> list[str]:

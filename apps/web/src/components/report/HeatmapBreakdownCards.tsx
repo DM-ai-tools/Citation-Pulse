@@ -21,7 +21,7 @@ export function HeatmapBreakdownCards({
   const { brandTop, brandLower, comp, none, engineError, pct } = heatmapBreakdownCounts(cells);
   const cards = [
     {
-      label: "BRAND CITED",
+      label: "BRAND CITED (TOP)",
       sub: `${pct(brandTop)}%`,
       val: brandTop,
       wrap: "bg-[#1FB36B] text-white",
@@ -29,7 +29,7 @@ export function HeatmapBreakdownCards({
       smallClass: "text-white/90",
     },
     {
-      label: "LOWER POSITION",
+      label: "BRAND CITED (LOWER)",
       sub: `${pct(brandLower)}%`,
       val: brandLower,
       wrap: "bg-[#8EE5B7]",
@@ -37,7 +37,7 @@ export function HeatmapBreakdownCards({
       smallClass: "text-[#14653e]",
     },
     {
-      label: "COMPETITOR CITED",
+      label: "COMPETITOR ONLY",
       sub: `${pct(comp)}%`,
       val: comp,
       wrap: "bg-tr-landingOrange text-white",
@@ -45,7 +45,7 @@ export function HeatmapBreakdownCards({
       smallClass: "text-white/90",
     },
     {
-      label: "NOT VISIBLE",
+      label: "BRAND & COMP ABSENT",
       sub: `${pct(none)}%`,
       val: none,
       wrap: "bg-[#E74C3C] text-white",

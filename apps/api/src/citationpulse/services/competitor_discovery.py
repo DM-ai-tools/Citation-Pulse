@@ -26,19 +26,17 @@ from citationpulse.services.llm_router import (
     chat_completion_sync,
     openrouter_configured,
 )
+from citationpulse.constants.competitor_targets import (
+    EXPANSION_BATCH_SIZE,
+    EXPANSION_ONE_LEVEL_ABOVE_BATCH,
+    EXPANSION_SAME_LEVEL_BATCH,
+    INITIAL_CANDIDATE_TARGET,
+    ONE_LEVEL_ABOVE_COUNT,
+    SAME_LEVEL_COUNT,
+)
 from citationpulse.services.normalization import registrable_domain
 
 _log = logging.getLogger(__name__)
-
-# Initial discovery: 8–12 candidates (~50% same-tier, ~50% one-tier-above).
-SAME_LEVEL_COUNT = 6
-ONE_LEVEL_ABOVE_COUNT = 6
-INITIAL_CANDIDATE_TARGET = SAME_LEVEL_COUNT + ONE_LEVEL_ABOVE_COUNT
-
-# Expansion batch when tier-balanced cited minimums are not met.
-EXPANSION_SAME_LEVEL_BATCH = 4
-EXPANSION_ONE_LEVEL_ABOVE_BATCH = 4
-EXPANSION_BATCH_SIZE = EXPANSION_SAME_LEVEL_BATCH + EXPANSION_ONE_LEVEL_ABOVE_BATCH
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 
@@ -258,7 +256,7 @@ def _normalize_above_row(row: dict[str, Any], *, target_tier: int | None) -> One
     cites = _citations_for_row(row, dom)
     tier_num = _parse_tier(str(row.get("tier") or ""))
     if target_tier is not None and tier_num is not None:
-        if tier_num <= target_tier or tier_num > target_tier + 2:
+        if tier_num <= target_tier:
             return None
     # Trust one_level_above_competitors list when tier label missing.
     elif target_tier is not None and tier_num is None:
@@ -329,6 +327,7 @@ def _finalize_discovery(
         raise CompetitorDiscoveryError("Missing target_company in model JSON")
     target = TargetCompanyAnalysis.model_validate(target_raw)
     target_tier = _parse_tier(target.company_tier)
+    effective_above_cap = one_level_above_cap
 
     same: list[SameLevelCompetitor] = []
     for row in data.get("same_level_competitors") or []:
@@ -344,7 +343,7 @@ def _finalize_discovery(
             parsed = _normalize_above_row(row, target_tier=target_tier)
             if parsed:
                 above.append(parsed)
-    above = _assign_ranks_above(above)[:one_level_above_cap]
+    above = _assign_ranks_above(above)[:effective_above_cap]
 
     summary_raw = data.get("validation_summary")
     notes: list[str] = []
@@ -352,9 +351,9 @@ def _finalize_discovery(
         notes.append(str(summary_raw["notes"]))
     if len(same) < same_level_cap:
         notes.append(f"Only {len(same)} same-level competitors passed validation (target {same_level_cap}).")
-    if len(above) < one_level_above_cap:
+    if effective_above_cap > 0 and len(above) < effective_above_cap:
         notes.append(
-            f"Only {len(above)} one-level-above competitors passed validation (target {one_level_above_cap})."
+            f"Only {len(above)} one-level-above competitors passed validation (target {effective_above_cap})."
         )
 
     summary = DiscoveryValidationSummary(
@@ -418,7 +417,7 @@ def merge_competitor_discovery(
 
     append_rows("same_level_competitors", list(addon.same_level_competitors))
     append_rows("one_level_above_competitors", list(addon.one_level_above_competitors))
-    added = len(seen) - before
+    added = len(discovery_domains(out)) - before
     summary = out.get("validation_summary")
     if isinstance(summary, dict) and added:
         summary = dict(summary)
@@ -506,12 +505,13 @@ def expand_competitors(
 
 
 def _validate_counts(result: CompetitorDiscoveryResult) -> None:
+    """Optional strict check — discovery caps lists in ``_finalize_discovery`` instead."""
     n_same = len(result.same_level_competitors)
     n_above = len(result.one_level_above_competitors)
-    if n_same != SAME_LEVEL_COUNT or n_above != ONE_LEVEL_ABOVE_COUNT:
+    if n_same > SAME_LEVEL_COUNT or n_above > ONE_LEVEL_ABOVE_COUNT:
         raise CompetitorDiscoveryError(
-            f"Expected {SAME_LEVEL_COUNT} same-level and {ONE_LEVEL_ABOVE_COUNT} one-level-above "
-            f"competitors; got {n_same} and {n_above}. Retry or adjust exclusions."
+            f"At most {SAME_LEVEL_COUNT} same-level and {ONE_LEVEL_ABOVE_COUNT} competitors ahead "
+            f"competitors; got {n_same} and {n_above}."
         )
 
 

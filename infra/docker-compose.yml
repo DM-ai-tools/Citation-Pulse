@@ -1,0 +1,55 @@
+# Local production-style stack (optional). Railway uses per-service Dockerfiles in apps/*.
+# Usage: from repo root — docker compose -f infra/docker-compose.yml up --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: citationpulse
+      POSTGRES_PASSWORD: citationpulse
+      POSTGRES_DB: citationpulse_geo
+    ports:
+      - "5434:5432"
+    volumes:
+      - cp_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U citationpulse -d citationpulse_geo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://citationpulse:citationpulse@postgres:5432/citationpulse_geo
+      PUBLIC_ACCESS_MODE: "true"
+      AUTH_DISABLE_JWT: "true"
+      API_CORS_ORIGINS: http://localhost:3000
+      PORT: "8000"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_SKIP_AUTH: "true"
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  cp_pg_data:

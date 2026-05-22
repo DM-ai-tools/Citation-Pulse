@@ -51,7 +51,7 @@ export type ReportData = ScanSnapshot & {
     tier?: string;
     source?: string;
   }[];
-  /** Competitors returned by AI discovery (same-level + one tier above). */
+  /** Competitors returned by AI discovery (same-tier + competitors ahead). */
   analysis_competitors?: {
     domain: string;
     name: string;

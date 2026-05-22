@@ -6,17 +6,13 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ErrorState, Skeleton } from "@/components/primitives";
 import { buildGapAnalysisFromOpportunities } from "@/lib/gapAnalysisFallback";
+import { gapDisplayTitleFromAnalysis } from "@/lib/gapLabels";
 import { getBrandGapsAnalysis } from "@/services/brands";
 import type { GapAnalysisRow } from "@/types/gapsAnalysis";
 import type { ReportData } from "@/types/report";
 
 function rowTitle(row: GapAnalysisRow): string {
-  const base = row.title?.trim() || "(prompt)";
-  if (row.affected_engines.length === 1 && row.gap_type.includes("engine")) {
-    const eng = row.affected_engines[0];
-    if (!base.includes(eng)) return `${base} · ${eng}`;
-  }
-  return base;
+  return gapDisplayTitleFromAnalysis(row);
 }
 
 function gradeBadgeClass(grade: string) {
@@ -61,7 +57,29 @@ function AnalysisField({ label, children }: { label: string; children: string })
   );
 }
 
-function GapRow({ row }: { row: GapAnalysisRow }) {
+function GapSummaryRow({ row }: { row: GapAnalysisRow }) {
+  return (
+    <li className="border-b border-tr-line px-[22px] py-4 last:border-b-0">
+      <div className="flex flex-wrap items-start gap-3 sm:flex-nowrap sm:gap-4">
+        <div
+          className={cn(
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-display text-base font-black",
+            gradeBadgeClass(row.grade),
+          )}
+          aria-hidden
+        >
+          {row.grade}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-[14.5px] font-bold leading-snug text-tr-navy">{rowTitle(row)}</p>
+          <p className="mt-2 text-[13px] leading-relaxed text-tr-body">{row.summary}</p>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+export function GapRow({ row }: { row: GapAnalysisRow }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -153,9 +171,12 @@ function GapRow({ row }: { row: GapAnalysisRow }) {
 export function GapsPanel({
   brandId,
   scanReport,
+  summaryOnly = false,
 }: {
   brandId?: string;
   scanReport?: ReportData;
+  /** Title + description only (no expandable analysis). */
+  summaryOnly?: boolean;
 }) {
   const rowsFromScan = useMemo(
     () => (scanReport ? buildGapAnalysisFromOpportunities(scanReport.opportunities ?? []) : null),
@@ -183,7 +204,9 @@ export function GapsPanel({
         <h2 className="font-display text-sm font-extrabold uppercase tracking-wide text-tr-navy">
           Gap opportunities
         </h2>
-        <p className="text-xs text-tr-mute">click a row to expand details</p>
+        <p className="text-xs text-tr-mute">
+          {summaryOnly ? "gap title and description" : "click a row to expand details"}
+        </p>
       </div>
 
       {isPending ? (
@@ -208,9 +231,13 @@ export function GapsPanel({
       {isSuccess && rows && rows.length > 0 ? (
         <>
           <ul className="list-none pl-0">
-            {rows.map((row) => (
-              <GapRow key={row.opportunity_id} row={row} />
-            ))}
+            {rows.map((row) =>
+              summaryOnly ? (
+                <GapSummaryRow key={row.opportunity_id} row={row} />
+              ) : (
+                <GapRow key={row.opportunity_id} row={row} />
+              ),
+            )}
           </ul>
           <div className="border-t border-tr-line bg-tr-pale/35 px-[22px] py-3">
             <div

@@ -191,24 +191,45 @@ export function CompetitorDiscovery({
         <h3 className="font-display text-sm font-extrabold uppercase tracking-wide text-tr-navy">
           AI competitor landscape
         </h3>
-        <p className="text-xs text-tr-mute">tiered · same level + one above</p>
+        <p className="text-xs text-tr-mute">your list + optional AI peers</p>
       </div>
 
       {!data ? (
         pending ? (
-          <div className="flex flex-col items-center gap-3 px-[22px] py-12 text-center" role="status" aria-live="polite">
-            <Spinner className="h-8 w-8 text-brand-primary" />
-            <p className="text-[13px] font-medium text-tr-navy">Building AI competitor landscape…</p>
-            <p className="max-w-md text-[12px] leading-relaxed text-tr-mute">
-              Analyzing same-level peers and one tier above. Engine citation checks start after this step.
-            </p>
+          <div className="space-y-6 px-[22px] py-6">
+            {(userProvided.length > 0 || analysisCompetitors.length > 0) ? (
+              <div className="rounded-xl border border-tr-line bg-[#FAFCFB] px-4 py-4">
+                <h4 className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-mute">
+                  Your competitors
+                </h4>
+                <p className="mt-1 text-[12px] text-tr-mute">
+                  Listed on your scan — citation results appear in the section below.
+                </p>
+                <div className="mt-3 max-h-[280px] overflow-y-auto pr-1">
+                  <CompetitorRoster
+                    analysis={analysisCompetitors}
+                    userProvided={userProvided}
+                    variant="report"
+                  />
+                </div>
+              </div>
+            ) : null}
+            <div className="flex flex-col items-center gap-3 py-6 text-center" role="status" aria-live="polite">
+              <Spinner className="h-8 w-8 text-brand-primary" />
+              <p className="text-[13px] font-medium text-tr-navy">Building AI competitor landscape…</p>
+              <p className="max-w-md text-[12px] leading-relaxed text-tr-mute">
+                Optional tiered peer research runs in the background. Your scan and citations still load without
+                waiting for this step.
+              </p>
+            </div>
           </div>
         ) : (
           <p className="px-[22px] py-10 text-center text-[13px] leading-relaxed text-tr-mute">
             {scanStatus === "completed" ? (
               <>
-                Competitor discovery did not run for this scan (OpenRouter may be unset, or auto-discover was off). Add{" "}
-                <code className="text-[12px]">OPENROUTER_API_KEY</code> and start a new scan with auto-discover enabled.
+                AI peer discovery did not complete (check OpenRouter credits in{" "}
+                <code className="text-[12px]">OPENROUTER_API_KEY</code>). Add competitors when starting a scan to
+                see citation results without waiting for AI discovery.
               </>
             ) : (
               <>
@@ -252,7 +273,7 @@ export function CompetitorDiscovery({
               </h4>
               <p className="mt-2 text-[12px] text-tr-mute">
                 {data.validation_summary.same_level_validated} same-level ·{" "}
-                {data.validation_summary.one_level_above_validated} one tier above · citations{" "}
+                {data.validation_summary.one_level_above_validated} competitors ahead · citations{" "}
                 {data.validation_summary.citations_verified ? "verified" : "incomplete"}
               </p>
               {data.validation_summary.notes ? (
@@ -277,7 +298,7 @@ export function CompetitorDiscovery({
           {above.length > 0 ? (
             <div>
               <h4 className="font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-mute">
-                One level above · ranked by evidence ({above.length})
+                Competitors ahead · ranked by evidence ({above.length})
               </h4>
               <ul className="mt-3 space-y-3">
                 {above.map((row) => (

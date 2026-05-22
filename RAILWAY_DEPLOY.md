@@ -52,4 +52,5 @@ Optional build arg: `NEXT_PUBLIC_APP_VERSION=$RAILWAY_GIT_COMMIT_SHA`
 2. Open web `/login`, sign up / sign in
 3. Run a scan on `/landing`, confirm report and dashboard load
 
-Full troubleshooting: `infra/railway/README.md`.
+Full troubleshooting: `infra/railway/README.md`.  
+Latest audit: `DEPLOYMENT_REPORT.md`. Local stack: `docker compose -f infra/docker-compose.yml up --build`.

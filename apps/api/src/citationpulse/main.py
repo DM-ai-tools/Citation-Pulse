@@ -113,7 +113,18 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
     _log.exception("Unhandled error %s %s", request.method, request.url.path)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    s = get_settings()
+    detail = "Internal server error"
+    if s.environment.lower() in ("development", "dev", "local"):
+        name = type(exc).__name__
+        if "TimeoutError" in name or "timeout" in str(exc).lower():
+            detail = (
+                "Database connection pool exhausted or Postgres unreachable. "
+                "Restart the API, ensure Postgres is running, and use npm run dev:stack."
+            )
+        else:
+            detail = f"{name}: {str(exc)[:200]}"
+    return JSONResponse(status_code=500, content={"detail": detail})
 
 
 @app.get("/")
@@ -146,18 +157,37 @@ def root():
 
 @app.get("/health")
 def health():
+    from sqlalchemy import text
+
     s = get_settings()
     jwt_ok = bool((s.auth_jwt_secret or "").strip()) and (s.auth_jwt_secret or "").strip() not in (
         "change-me-set-AUTH_JWT_SECRET-in-production",
         "change-me-use-openssl-rand-hex-32",
     )
-    return {
-        "status": "ok",
+    db_ok = False
+    db_error: str | None = None
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            db_ok = True
+        finally:
+            db.close()
+    except Exception as exc:
+        db_error = str(exc)[:240]
+        _log.warning("health db check failed: %s", exc)
+    status = "ok" if db_ok else "degraded"
+    out: dict[str, object] = {
+        "status": status,
+        "database": "ok" if db_ok else "error",
         "environment": s.environment,
         "openrouter_configured": openrouter_configured(),
         "auth_jwt_configured": jwt_ok,
         "celery_tasks_inline": celery_run_tasks_inline(),
     }
+    if db_error and s.environment.lower() in ("development", "dev", "local"):
+        out["database_error"] = db_error
+    return out
 
 
 @app.get("/metrics")

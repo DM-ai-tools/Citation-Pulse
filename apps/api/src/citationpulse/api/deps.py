@@ -150,14 +150,19 @@ def resolve_tenant(db: Session, claims: dict[str, Any]) -> Tenant:
         return tenant
 
     settings = get_settings()
-    if claims.get("mode") == "dev" and settings.environment.lower() in ("development", "dev", "local"):
-        tenant = db.query(Tenant).order_by(Tenant.created_at.asc()).first()
-        if not tenant:
-            tenant = Tenant(name="Default", plan="saas")
-            db.add(tenant)
-            db.commit()
-            db.refresh(tenant)
-        return tenant
+    if claims.get("mode") == "dev":
+        if settings.public_access_mode or settings.auth_disable_jwt:
+            from citationpulse.services.scans_flow import get_or_create_anonymous_tenant
+
+            return get_or_create_anonymous_tenant(db)
+        if settings.environment.lower() in ("development", "dev", "local"):
+            tenant = db.query(Tenant).order_by(Tenant.created_at.asc()).first()
+            if not tenant:
+                tenant = Tenant(name="Default", plan="saas")
+                db.add(tenant)
+                db.commit()
+                db.refresh(tenant)
+            return tenant
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

@@ -1,5 +1,6 @@
 "use client";
 
+import { competitorLevelLabel } from "@/lib/competitorLevelLabels";
 import { cn } from "@/lib/utils";
 
 export type CompetitorRosterItem = {
@@ -12,10 +13,7 @@ export type CompetitorRosterItem = {
 };
 
 function levelLabel(level: string): string {
-  if (level === "user_provided") return "Competitor";
-  if (level === "one_level_above") return "One tier above";
-  if (level === "same_level") return "Same level";
-  return level.replace(/_/g, " ");
+  return competitorLevelLabel(level) || level.replace(/_/g, " ");
 }
 
 function CompetitorChip({ item }: { item: CompetitorRosterItem }) {

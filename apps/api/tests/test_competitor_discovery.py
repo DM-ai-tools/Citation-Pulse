@@ -15,9 +15,11 @@ if _SRC not in sys.path:
 
 from citationpulse.prompts.competitor_discovery import build_competitor_discovery_messages  # noqa: E402
 from citationpulse.schemas.competitors import CompetitorAnalyzeRequest, CompetitorDiscoveryResult  # noqa: E402
-from citationpulse.services.competitor_discovery import (  # noqa: E402
-    SAME_LEVEL_COUNT,
+from citationpulse.constants.competitor_targets import (  # noqa: E402
     ONE_LEVEL_ABOVE_COUNT,
+    SAME_LEVEL_COUNT,
+)
+from citationpulse.services.competitor_discovery import (  # noqa: E402
     CompetitorDiscoveryError,
     _filter_excluded,
     _finalize_discovery,
@@ -40,8 +42,8 @@ def test_build_messages_includes_target_and_exclusions():
     assert "https://example.com.au" in user
     assert "gutter replacement" in user
     assert "yellowpages.com.au" in user
-    assert "exactly 5 objects" in user
-    assert "5 same_level_competitors" in user
+    assert f"exactly {SAME_LEVEL_COUNT} objects" in user
+    assert f"{SAME_LEVEL_COUNT} same_level_competitors" in user
     assert "validation_summary" in user
 
 
@@ -64,21 +66,11 @@ def test_filter_excluded_removes_domains():
     assert out["same_level_competitors"][0]["domain"] == "keep.com.au"
 
 
-def test_validate_counts_raises():
-    sample = {
-        "target_company": {
-            "domain": "x.com",
-            "name": "X",
-            "detected_services": [],
-            "detected_niche": "",
-            "detected_locations": [],
-            "company_tier": "Tier 1",
-            "tier_reasoning": "r",
-        },
-        "same_level_competitors": [],
-        "one_level_above_competitors": [],
-    }
-    result = CompetitorDiscoveryResult.model_validate(sample)
+def test_validate_counts_raises_when_over_cap():
+    data = _sample_result_dict()
+    data["same_level_competitors"].append(dict(data["same_level_competitors"][0]))
+    result = CompetitorDiscoveryResult.model_validate(data)
+    assert len(result.same_level_competitors) == SAME_LEVEL_COUNT + 1
     with pytest.raises(CompetitorDiscoveryError):
         _validate_counts(result)
 

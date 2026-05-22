@@ -43,6 +43,7 @@ celery_app.conf.update(
         "citationpulse.start_scan": {"queue": "default"},
         "citationpulse.run_scan_engine_waves": {"queue": "default"},
         "citationpulse.competitor_discovery_for_scan": {"queue": "default"},
+        "citationpulse.enrich_competitor_after_scan": {"queue": "default"},
         "citationpulse.daily_beat": {"queue": "default"},
         "citationpulse.detect_opportunities": {"queue": "default"},
     },

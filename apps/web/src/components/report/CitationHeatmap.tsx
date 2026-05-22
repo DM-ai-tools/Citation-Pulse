@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { CitationScenarioLegend } from "@/components/report/CitationScenarioLegend";
 import { cn } from "@/lib/utils";
 import { engineTitle } from "@/lib/engineDisplay";
+import { isBrandCitedTop } from "@/lib/matrixCellTier";
 import type { MatrixCell } from "@/types/scan";
 
 const ENGINE_SUB: Record<string, string> = {
@@ -42,7 +44,7 @@ function ReportMatrixCell({ cell, mode }: { cell: MatrixCell | undefined; mode: 
   }
   if (st === "cited") {
     const pos = cell?.position;
-    const top = pos === 1;
+    const top = isBrandCitedTop(cell);
     return (
       <div
         className={cn(
@@ -50,8 +52,9 @@ function ReportMatrixCell({ cell, mode }: { cell: MatrixCell | undefined; mode: 
           "cursor-pointer font-display text-[9px] font-extrabold transition hover:scale-[1.02] sm:text-[11.5px] sm:hover:scale-[1.04]",
           top ? "bg-[#1FB36B] text-white" : "bg-[#8EE5B7] text-[#14512f]",
         )}
+        title={top ? "Brand cited (top)" : "Brand cited (lower)"}
       >
-        <span className="leading-tight">cited</span>
+        <span className="leading-tight">{top ? "top" : "lower"}</span>
         {mode === "final" && pos != null && (
           <small className="mt-0.5 text-[8px] font-semibold uppercase leading-tight opacity-85 sm:text-[9.5px]">
             pos {pos}
@@ -123,10 +126,15 @@ function LegacyMatrixTile({ cell, mode }: { cell: MatrixCell | undefined; mode: 
   }
   if (st === "cited") {
     const pos = cell?.position;
-    const top = pos === 1;
+    const top = isBrandCitedTop(cell);
     return (
-      <div className={cn(tile, top ? "bg-emerald-500" : "bg-emerald-400", "text-white")}>
-        <span className="text-[8px] font-bold uppercase tracking-wide sm:text-[10px]">cited</span>
+      <div
+        className={cn(tile, top ? "bg-emerald-500" : "bg-emerald-400", "text-white")}
+        title={top ? "Brand cited (top)" : "Brand cited (lower)"}
+      >
+        <span className="text-[8px] font-bold uppercase tracking-wide sm:text-[10px]">
+          {top ? "top" : "lower"}
+        </span>
         {mode === "final" && pos != null && (
           <span className="mt-0.5 text-[8px] font-bold uppercase leading-tight tracking-wider sm:text-[9px]">
             pos {pos}
@@ -339,20 +347,7 @@ export function CitationHeatmap({
                 ))}
               </div>
             ))}
-            <div className="mt-4 flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[10px] border border-tr-line bg-white px-4 py-3 text-[11.5px] text-tr-body">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3.5 w-3.5 rounded bg-[#1FB36B]" /> Brand cited (top)
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3.5 w-3.5 rounded bg-[#8EE5B7]" /> Brand cited (lower)
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3.5 w-3.5 rounded bg-tr-landingOrange" /> Competitor cited only
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3.5 w-3.5 rounded bg-[#E74C3C]" /> Brand &amp; comp absent
-              </span>
-            </div>
+            <CitationScenarioLegend variant="heatmap" className="mt-4" />
           </div>
         </div>
       </div>
@@ -416,22 +411,11 @@ export function CitationHeatmap({
           </tbody>
         </table>
       </div>
-      {visual === "tiles" && (
-        <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 text-[11px] font-medium text-slate-600">
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded bg-emerald-500" /> Brand cited (top)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded bg-emerald-400" /> Brand cited (lower)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded bg-amber-500" /> Competitor cited only
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded bg-red-500" /> Brand &amp; comp absent
-          </span>
+      {visual === "tiles" ? (
+        <div className="border-t border-slate-100 bg-slate-50/70 px-5 py-3">
+          <CitationScenarioLegend variant="heatmap" />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

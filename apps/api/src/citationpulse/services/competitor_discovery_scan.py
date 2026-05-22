@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from citationpulse.constants.competitor_targets import TOTAL_COMPETITOR_COUNT
 from citationpulse.models.domain import Brand, Scan
 from citationpulse.schemas.competitors import CompetitorAnalyzeRequest, CompetitorDiscoveryResult
 from citationpulse.services.competitor_discovery import (
@@ -18,8 +20,8 @@ from citationpulse.services.normalization import registrable_domain
 
 _log = logging.getLogger(__name__)
 
-# No practical cap on how many competitor brands we link for a scan (UI shows all engine-cited).
-_MAX_TRACKED_COMPETITORS = 64
+# Link at most the final competitor set (+ small buffer for expansion passes).
+_MAX_TRACKED_COMPETITORS = max(TOTAL_COMPETITOR_COUNT, 8)
 
 
 def _locale_to_market(locale: str) -> str:
@@ -148,6 +150,9 @@ def run_competitor_discovery_for_scan(
         return None
 
     scan.competitor_discovery = result.model_dump(mode="json")
+    from citationpulse.services.competitor_final_selection import cap_discovery_lists
+
+    scan.competitor_discovery = cap_discovery_lists(scan.competitor_discovery)
     set_discovery_status(scan, "done")
     domains = _collect_domains(result)
     _ensure_competitor_brands(db, tenant_id=brand.tenant_id, main_brand=brand, domains=domains)
@@ -160,22 +165,53 @@ def _discovery_params(scan: Scan) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _has_user_provided_in_params(params: dict[str, Any]) -> bool:
+    rows = params.get("user_provided_competitors")
+    return isinstance(rows, list) and any(
+        isinstance(r, dict) and str(r.get("domain") or "").strip() for r in rows
+    )
+
+
 def set_discovery_status(scan: Scan, status: str) -> None:
     """Track background discovery lifecycle in ``discovery_params`` (no migration)."""
     params = _discovery_params(scan)
     params["discovery_status"] = status
+    if status == "pending" and not params.get("discovery_started_at"):
+        params["discovery_started_at"] = datetime.now(timezone.utc).isoformat()
     scan.discovery_params = params
 
 
+def _discovery_pending_timed_out(params: dict[str, Any], *, max_seconds: int = 90) -> bool:
+    started_raw = params.get("discovery_started_at")
+    if not started_raw:
+        return False
+    try:
+        started = datetime.fromisoformat(str(started_raw).replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - started).total_seconds()
+        return age > max_seconds
+    except (TypeError, ValueError):
+        return False
+
+
 def competitor_discovery_pending(scan: Scan) -> bool:
-    """True while tiered discovery runs (before engine citation checks)."""
+    """
+    True while tiered AI discovery is still running.
+
+    Does not block the report when the user already listed competitors (roster + citations load separately).
+    """
     if isinstance(scan.competitor_discovery, dict) and scan.competitor_discovery:
         return False
     if not auto_discover_enabled(scan):
         return False
     params = _discovery_params(scan)
+    if _has_user_provided_in_params(params):
+        return False
     status = params.get("discovery_status")
     if status in ("failed", "skipped", "done"):
+        return False
+    if status == "pending" and _discovery_pending_timed_out(params):
         return False
     return status == "pending"
 

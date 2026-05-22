@@ -466,5 +466,18 @@ def get_router() -> LLMRouter:
 
 
 def chat_completion_sync(**kwargs: Any) -> LLMResponse:
-    """Run `chat_completion()` to completion from sync code."""
-    return asyncio.run(get_router().chat_completion(**kwargs))
+    """Run `chat_completion()` to completion from sync code (Celery, sync DB hooks).
+
+    Safe when called from inside ``asyncio.run()`` (e.g. scan engine waves): uses a
+    worker thread instead of nesting ``asyncio.run()``.
+    """
+    coro = get_router().chat_completion(**kwargs)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()

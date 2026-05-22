@@ -49,6 +49,9 @@ export type CompetitorCitationVisibility = {
   prompt_id?: string;
   prompt_text: string;
   engines: string[];
+  /** All strict checks passed (2+2, each ≥2 AIs per prompt). */
+  validation_complete?: boolean;
+  display_ready?: boolean;
   ranked_competitors: RankedCompetitorVisibility[];
   /** Same as ranked_competitors — discovery + user-provided companies. */
   competitors?: RankedCompetitorVisibility[];

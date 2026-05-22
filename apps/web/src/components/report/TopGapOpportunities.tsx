@@ -1,16 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { engineTitle } from "@/lib/engineDisplay";
+import { CitationScenarioLegend } from "@/components/report/CitationScenarioLegend";
+import { gapDisplayDescription, gapDisplayTitle, gapScenarioHint } from "@/lib/gapLabels";
 import type { OpportunityRow } from "@/types/report";
-
-function rowTitle(row: OpportunityRow): string {
-  const base = row.title?.trim() || "(prompt)";
-  if (row.scope) {
-    return `${base} · ${engineTitle(row.scope)}`;
-  }
-  return base;
-}
 
 function gradeBadgeClass(grade: string) {
   if (grade === "A") return "bg-sky-100 text-[#0c4a6e]";
@@ -39,45 +33,47 @@ function formatMonthlySearches(v: number | null | undefined): string {
   return String(Math.round(v));
 }
 
-const GRADE_LEGEND = [
-  { swatch: "bg-rose-400", label: "HOT · A — fix first" },
-  { swatch: "bg-amber-400", label: "WARM · B — plan next" },
-  { swatch: "bg-cyan-400", label: "COOL · C — track later" },
-] as const;
-
-function OpportunitiesLegendFootnote() {
+function OpportunitiesLegendFootnote({
+  gapsHref,
+  gapCount,
+  showGapsLink = true,
+}: {
+  gapsHref: string;
+  gapCount: number;
+  showGapsLink?: boolean;
+}) {
   return (
     <div className="border-t border-tr-line bg-tr-pale/35 px-[22px] py-3">
-      <div
-        className="flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[10px] border border-tr-line bg-white px-4 py-3 text-[11.5px] text-tr-body"
-        role="list"
-        aria-label="How to read grades"
-      >
-        <span className="font-display text-[10px] font-extrabold uppercase tracking-wide text-tr-navy">
-          How to read grades
-        </span>
-        {GRADE_LEGEND.map((item) => (
-          <span key={item.label} className="inline-flex items-center gap-1.5" role="listitem">
-            <span className={cn("h-3.5 w-3.5 shrink-0 rounded", item.swatch)} aria-hidden />
-            {item.label}
-          </span>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <CitationScenarioLegend variant="grades" title="How to read grades" className="min-w-0 flex-1" />
+        {showGapsLink ? (
+          <Link
+            href={gapsHref}
+            className="shrink-0 font-display text-[11px] font-extrabold uppercase tracking-wide text-tr-navy underline decoration-tr-line underline-offset-2 hover:text-brand-primary"
+          >
+            View details ({gapCount})
+          </Link>
+        ) : null}
       </div>
     </div>
   );
 }
 
-/** Gap list for reports — full row layout, no click-to-expand. */
+/** Summary on the report; full gaps UI lives at `/report/[scanId]/gaps`. */
 export function TopGapOpportunities({
   opportunities,
+  scanId,
   className,
   id,
 }: {
   opportunities: OpportunityRow[];
+  /** When set, shows link to full gaps page. */
+  scanId?: string;
   className?: string;
   id?: string;
 }) {
   const rows = Array.isArray(opportunities) ? opportunities : [];
+  const gapsHref = scanId ? `/report/${encodeURIComponent(scanId)}/gaps` : "#";
 
   return (
     <section
@@ -97,56 +93,62 @@ export function TopGapOpportunities({
 
       {rows.length === 0 ? (
         <p className="px-[22px] py-10 text-center text-[13px] leading-relaxed text-tr-mute">
-          No graded gaps for this scan yet — the API builds this list when the scan finishes. If you still see this after
-          a <strong className="font-semibold text-tr-navy">completed</strong> scan, your prompts may not match any gap
-          pattern (e.g. brand cited across engines).
+          No graded gaps for this scan yet — the API builds this list when the scan finishes.
         </p>
       ) : (
-        <ul className="divide-y divide-tr-line">
-          {rows.map((row) => (
-            <li
-              key={row.id}
-              className="flex flex-wrap items-start gap-3 px-[22px] py-4 sm:flex-nowrap sm:gap-4"
-              data-testid="gap-summary-row"
-            >
-              <div
-                className={cn(
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-display text-base font-black",
-                  gradeBadgeClass(row.grade),
-                )}
-                aria-hidden
+        <>
+          <ul className="divide-y divide-tr-line">
+            {rows.map((row) => (
+              <li
+                key={row.id}
+                className="flex flex-wrap items-start gap-3 px-[22px] py-4 sm:flex-nowrap sm:gap-4"
+                data-testid="gap-summary-row"
               >
-                {row.grade}
-              </div>
-              <div className="min-w-0 flex-1 basis-[min(100%,16rem)] sm:basis-auto">
-                <p className="font-display text-[14.5px] font-bold leading-snug text-tr-navy">{rowTitle(row)}</p>
-                <p className="mt-1 text-[12.5px] leading-relaxed text-tr-mute">{row.description}</p>
-              </div>
-              <div className="ml-auto flex shrink-0 items-start gap-4 sm:ml-0">
-                <div className="text-right">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-tr-mute">
-                    Est. monthly searches
-                  </p>
-                  <p className="mt-0.5 font-display text-[15px] font-black tabular-nums text-tr-navy">
-                    {formatMonthlySearches(row.est_volume)}
-                  </p>
+                <div
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-display text-base font-black",
+                    gradeBadgeClass(row.grade),
+                  )}
+                  title={gapScenarioHint(row)}
+                >
+                  {row.grade}
                 </div>
-                <div className="pt-0.5">
-                  <span
-                    className={cn(
-                      "inline-flex rounded-full px-2.5 py-1 font-display text-[10.5px] font-extrabold uppercase tracking-wide",
-                      heatPillClass(row.grade),
-                    )}
+                <div className="min-w-0 flex-1 basis-[min(100%,16rem)] sm:basis-auto">
+                  <p
+                    className="font-display text-[14.5px] font-bold leading-snug text-tr-navy"
+                    title={row.title?.trim() || undefined}
                   >
-                    {row.heat} · {row.grade}
-                  </span>
+                    {gapDisplayTitle(row)}
+                  </p>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-tr-mute">{gapDisplayDescription(row)}</p>
                 </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+                <div className="ml-auto flex shrink-0 items-start gap-4 sm:ml-0">
+                  <div className="text-right">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-tr-mute">
+                      Est. monthly searches
+                    </p>
+                    <p className="mt-0.5 font-display text-[15px] font-black tabular-nums text-tr-navy">
+                      {formatMonthlySearches(row.est_volume)}
+                    </p>
+                  </div>
+                  <div className="pt-0.5">
+                    <span
+                      className={cn(
+                        "inline-flex rounded-full px-2.5 py-1 font-display text-[10.5px] font-extrabold uppercase tracking-wide",
+                        heatPillClass(row.grade),
+                      )}
+                      title={gapScenarioHint(row)}
+                    >
+                      {row.heat} · {row.grade}
+                    </span>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <OpportunitiesLegendFootnote gapsHref={gapsHref} gapCount={rows.length} showGapsLink={Boolean(scanId)} />
+        </>
       )}
-      {rows.length > 0 ? <OpportunitiesLegendFootnote /> : null}
     </section>
   );
 }

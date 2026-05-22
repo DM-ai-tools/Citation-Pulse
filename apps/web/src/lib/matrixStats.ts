@@ -1,10 +1,11 @@
+import { isBrandCitedTop } from "@/lib/matrixCellTier";
 import type { MatrixCell } from "@/types/scan";
 
 /** Per prompt × engine score (0–100), aligned with engine layer weighting. */
 export function matrixCellScore(c: MatrixCell | undefined): number {
   if (!c) return 0;
   const st = c.status;
-  if (st === "cited") return c.position === 1 ? 100 : 75;
+  if (st === "cited") return isBrandCitedTop(c) ? 100 : 75;
   if (st === "comp") return 55;
   if (st === "none" || st === "error") return 0;
   if (st === "running") return 30;
@@ -48,6 +49,11 @@ export function matrixAllCellsQueued(
   return true;
 }
 
+function cellIsTerminal(c: MatrixCell | undefined): boolean {
+  const st = c?.status ?? "queued";
+  return st === "cited" || st === "comp" || st === "none" || st === "error";
+}
+
 /** Every prompt × engine cell is terminal (cited / comp / none / error). */
 export function matrixAllEnginesTerminal(
   prompts: { id: string }[],
@@ -55,16 +61,36 @@ export function matrixAllEnginesTerminal(
   cells: MatrixCell[],
   scanStatus?: string,
 ): boolean {
-  if (
-    (scanStatus === "completed" || scanStatus === "failed") &&
-    cells.length === 0 &&
-    prompts.length > 0 &&
-    engines.length > 0
-  ) {
+  if (!prompts.length || !engines.length) return false;
+  if (scanStatus === "completed" || scanStatus === "failed") {
+    for (const p of prompts) {
+      for (const e of engines) {
+        const c = cells.find((x) => x.promptId === p.id && x.engine === e);
+        if (c && !cellIsTerminal(c)) return false;
+      }
+    }
     return true;
   }
-  if (!prompts.length || !engines.length) return false;
   return promptCompletionPct(prompts, engines, cells, null) === 100;
+}
+
+/** True when every scheduled cell has finished (safe to leave the live scan page). */
+export function scanMatrixFullyComplete(
+  prompts: { id: string }[],
+  engines: string[],
+  cells: MatrixCell[],
+): boolean {
+  return promptCompletionPct(prompts, engines, cells, null) === 100;
+}
+
+export function scanReadyForReport(
+  status: string | undefined,
+  prompts: { id: string }[],
+  engines: string[],
+  cells: MatrixCell[],
+): boolean {
+  if (status === "completed" || status === "failed") return true;
+  return scanMatrixFullyComplete(prompts, engines, cells);
 }
 
 /** Mean of per-engine scores — matches the heatmap layer dial when “All engines” is implied. */
@@ -95,7 +121,7 @@ export function engineLayerScores(
       n += 1;
       const c = cells.find((x) => x.promptId === p.id && x.engine === e);
       const st = c?.status;
-      if (st === "cited") pts += c?.position === 1 ? 100 : 75;
+      if (st === "cited") pts += isBrandCitedTop(c) ? 100 : 75;
       else if (st === "comp") pts += 55;
       else if (st === "none" || st === "error") pts += 0;
       else if (st === "running") pts += 30;
@@ -115,7 +141,7 @@ export function heatmapBreakdownCounts(cells: MatrixCell[]) {
   let engineError = 0;
   for (const c of cells) {
     if (c.status === "cited") {
-      if (c.position === 1) brandTop += 1;
+      if (isBrandCitedTop(c)) brandTop += 1;
       else brandLower += 1;
     } else if (c.status === "error") engineError += 1;
     else if (c.status === "none") none += 1;

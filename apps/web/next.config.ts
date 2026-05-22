@@ -13,13 +13,17 @@ const nextConfig: NextConfig = {
       .trim()
       .replace(/\/+$/, "");
     if (!target) return [];
-    return [{ source: "/api/v1/:path*", destination: `${target}/api/v1/:path*` }];
+    return [
+      { source: "/api/v1/:path*", destination: `${target}/api/v1/:path*` },
+      { source: "/health", destination: `${target}/health` },
+    ];
   },
   async redirects() {
     return [
-      { source: "/pricing", destination: "/dashboard", permanent: false },
-      { source: "/onboarding", destination: "/dashboard", permanent: false },
-      { source: "/export/deck", destination: "/dashboard", permanent: false },
+      { source: "/dashboard", destination: "/dashboard/gaps", permanent: false },
+      { source: "/pricing", destination: "/dashboard/gaps", permanent: false },
+      { source: "/onboarding", destination: "/dashboard/gaps", permanent: false },
+      { source: "/export/deck", destination: "/dashboard/gaps", permanent: false },
     ];
   },
   images: {

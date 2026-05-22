@@ -13,6 +13,9 @@ _settings = get_settings()
 _engine = create_engine(
     normalize_database_url(_settings.database_url),
     pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=60,
     echo=False,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)

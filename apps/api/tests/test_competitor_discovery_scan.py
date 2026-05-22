@@ -37,4 +37,14 @@ def test_auto_discover_always_enabled_even_when_stored_false():
     scan = _Scan()
     scan.discovery_params = {"auto_discover": False, "discovery_status": "pending"}
     assert auto_discover_enabled(scan) is True
+    assert competitor_discovery_pending(scan) is True
+
+
+def test_pending_false_when_user_provided_listed():
+    scan = _Scan()
+    scan.discovery_params = {
+        "auto_discover": True,
+        "discovery_status": "pending",
+        "user_provided_competitors": [{"domain": "a.com.au", "name": "A"}],
+    }
     assert competitor_discovery_pending(scan) is False

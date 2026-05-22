@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 import { DASHBOARD_LAST_SCAN_STORAGE_KEY } from "@/lib/dashboardScanPreference";
 
 const links = [
-  { href: "/dashboard", label: "Dashboard" },
+  // Dashboard section disabled — workspace uses Gaps only.
+  // { href: "/dashboard", label: "Dashboard" },
   { href: "/dashboard/gaps", label: "Gaps" },
 ];
 
@@ -28,7 +29,7 @@ function useWorkspaceLogoHref() {
     if (reportMatch?.[1]) return `/report/${reportMatch[1]}`;
     const id = storedScanId?.trim();
     if (id) return `/report/${id}`;
-    return "/dashboard";
+    return "/dashboard/gaps";
   }, [pathname, storedScanId]);
 }
 
@@ -46,8 +47,7 @@ export function AppSidebar({ mobile = false, onNavigate }: { mobile?: boolean; o
         Citation<span className="text-brand-primary">Pulse</span>
       </Link>
       {links.map((l) => {
-        const active =
-          l.href === "/dashboard" ? pathname === "/dashboard" : pathname === l.href || pathname.startsWith(`${l.href}/`);
+        const active = pathname === l.href || pathname.startsWith(`${l.href}/`);
         return (
           <Link
             key={l.href}

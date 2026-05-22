@@ -2,7 +2,7 @@
 
 import type { FormEvent, KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Select } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -62,6 +62,31 @@ export function ScanForm({ className }: { className?: string }) {
   const [locale, setLocale] = useState("en-AU");
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [apiStatus, setApiStatus] = useState<"checking" | "ok" | "down">("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const base = publicApiBaseUrl();
+        const healthUrl = base ? `${base.replace(/\/+$/, "")}/health` : "/health";
+        const r = await fetch(healthUrl, { signal: AbortSignal.timeout(8000) });
+        if (cancelled) return;
+        if (!r.ok) {
+          setApiStatus("down");
+          return;
+        }
+        const body = (await r.json()) as { status?: string; database?: string };
+        setApiStatus(body.database === "ok" || body.status === "ok" ? "ok" : "down");
+      } catch {
+        if (!cancelled) setApiStatus("down");
+      }
+    };
+    void check();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /** Split on commas: completed segments become tags; text after the last comma stays in the input. */
   function onPromptChange(raw: string) {
@@ -238,11 +263,32 @@ export function ScanForm({ className }: { className?: string }) {
     }
   }
 
+  const apiDown = apiStatus === "down";
+  const localApi = looksLikeLocalApi(publicApiBaseUrl());
+
   return (
     <div className={cn("relative", className)}>
       <span className="absolute -top-2.5 right-7 z-10 rounded-md bg-tr-landingOrange px-3 py-1 font-display text-[10px] font-extrabold uppercase tracking-wide text-[#1a1a1a] shadow-sm">
         FREE · 60 SECONDS
       </span>
+      {apiDown ? (
+        <div
+          className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] leading-relaxed text-amber-950"
+          role="alert"
+        >
+          <strong className="font-semibold">API not ready.</strong>{" "}
+          {localApi ? (
+            <>
+              Start the full dev stack from the repo root:{" "}
+              <code className="rounded bg-amber-100 px-1">npm run dev:stack</code> (web + API + worker), or run{" "}
+              <code className="rounded bg-amber-100 px-1">npm run dev:api</code> in a second terminal while Next.js
+              runs. Postgres must be up — see <code className="rounded bg-amber-100 px-1">docs/SETUP_WINDOWS.md</code>.
+            </>
+          ) : (
+            <>Check that your API URL is reachable and <code className="rounded bg-amber-100 px-1">DATABASE_URL</code> is valid.</>
+          )}
+        </div>
+      ) : null}
       <form
         onSubmit={onSubmit}
         className="space-y-4 rounded-[18px] border border-tr-line bg-[#F7FDF9] p-8 shadow-[0_16px_50px_rgba(16,58,38,0.14),0_0_0_1px_#D7EBDD] sm:p-8"
@@ -372,7 +418,7 @@ export function ScanForm({ className }: { className?: string }) {
         <div className="pt-1">
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || apiDown || apiStatus === "checking"}
             className="landing-form-submit w-full rounded-[10px] py-3.5 font-display text-[14.5px] font-bold uppercase tracking-[0.07em] text-white transition hover:brightness-[1.03] disabled:pointer-events-none disabled:opacity-50"
           >
             {loading ? "Starting…" : "▶ Start free citation scan"}

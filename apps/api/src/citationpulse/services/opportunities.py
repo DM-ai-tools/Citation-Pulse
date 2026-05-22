@@ -46,11 +46,14 @@ _DEFAULT_LOCATION_CODE = 2840  # US fallback
 
 _log = logging.getLogger(__name__)
 
-# Classifier states (dev doc naming)
-MISSING = "MISSING"
-COMPETITOR_ONLY = "COMPETITOR_ONLY"
-CITED_TOP = "CITED_TOP"
-CITED_LOWER = "CITED_LOWER"
+from citationpulse.services.citation_states import (
+    CITED_LOWER,
+    CITED_TOP,
+    COMPETITOR_ONLY,
+    MISSING,
+    classifier_state_from_brand_and_comp,
+    min_brand_position_zero_based,
+)
 
 
 def _scope_key(engine: str | None) -> str:
@@ -91,13 +94,11 @@ def run_to_classifier_state(db: Session, run: EngineRun | None) -> str:
         return MISSING
     brand_cites = [c for c in cites if c.ownership == Ownership.BRAND.value]
     comp_cites = [c for c in cites if c.ownership == Ownership.COMPETITOR.value]
-    if brand_cites:
-        positions = [c.position for c in brand_cites if c.position is not None]
-        pos = min(positions) if positions else 999
-        return CITED_TOP if pos <= 2 else CITED_LOWER
-    if comp_cites:
-        return COMPETITOR_ONLY
-    return MISSING
+    return classifier_state_from_brand_and_comp(
+        has_brand=bool(brand_cites),
+        has_competitor=bool(comp_cites),
+        min_brand_pos=min_brand_position_zero_based([c.position for c in brand_cites]),
+    )
 
 
 def _runs_latest_and_prev(
@@ -191,15 +192,44 @@ def opportunity_score(
     consecutive_gap_runs: int,
 ) -> float:
     n_eng = max(len(latest_states), 1)
-    vol = min(math.log10(max(est_volume or 1, 1)) / 5.0, 1.0)
     miss = sum(1 for c in latest_states.values() if c == MISSING)
     comp = sum(1 for c in latest_states.values() if c == COMPETITOR_ONLY)
     gap = (miss + 0.5 * comp) / float(n_eng)
-    cscore = min(competitor_cites / float(n_eng), 1.0)
+    cscore = min(competitor_cites / float(max(n_eng, 1)), 1.0)
     persist = min(consecutive_gap_runs / 7.0, 1.0)
+
+    # Search volume from DataForSEO drives the HOT/WARM split when present.
+    if est_volume is not None and est_volume > 0:
+        vol = min(math.log10(max(est_volume, 1)) / 5.0, 1.0)
+    else:
+        # Neutral baseline when volume is unknown — avoids every row scoring as COOL · C.
+        vol = 0.28
+
     s = 0.40 * vol + 0.30 * gap + 0.20 * cscore + 0.10 * persist
-    if gap_type == "absent_all" and (est_volume or 0) > 5000:
-        s = max(s, 0.71)
+
+    # Severity floors aligned with heatmap: no brand citation = HOT · A, not WARM · B.
+    cited_n = sum(1 for c in latest_states.values() if c in (CITED_TOP, CITED_LOWER))
+    if gap_type == "absent_all":
+        # Brand missing on every engine — matches red heatmap cells.
+        s = max(s, 0.75)
+        if (est_volume or 0) > 5000:
+            s = max(s, 0.82)
+    elif gap_type == "competitor_dominant":
+        # Competitors cited, brand absent on multiple engines.
+        s = max(s, 0.72)
+        if comp >= 2 or competitor_cites >= 2:
+            s = max(s, 0.78)
+    elif gap_type == "refresh_content":
+        s = max(s, 0.70)
+    elif gap_type == "engine_specific_gap":
+        # Brand cited on most engines; one engine still open.
+        s = max(s, 0.55)
+    elif gap_type == "weak_engine":
+        s = max(s, 0.52)
+    elif gap_type == "extend_presence":
+        # Mixed matrix: some visibility, gaps remain — track / extend.
+        s = min(max(s, 0.38 + 0.04 * cited_n), 0.65)
+
     return round(float(s), 3)
 
 
@@ -415,7 +445,10 @@ def sync_prompt_volumes_for_brand(db: Session, brand_id: UUID) -> int:
         def _clean_keyword(text: str) -> str:
             import re
             cleaned = re.sub(r"[?!;:\"'()[\]{}<>@#$%^&*\\|~`]", " ", text[:700])
-            return " ".join(cleaned.split())
+            words = " ".join(cleaned.split())
+            if len(words) > 80:
+                words = words[:80].rsplit(" ", 1)[0] or words[:80]
+            return words
 
         keywords = [_clean_keyword(p.text) for p in locale_prompts]
         try:

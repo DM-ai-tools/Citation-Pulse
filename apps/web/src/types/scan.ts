@@ -1,3 +1,5 @@
+import type { CompetitorDiscoveryResult } from "@/types/competitors";
+
 export type EngineKey = "chatgpt" | "perplexity" | "gemini" | "claude";
 
 export type CellStatus = "queued" | "running" | "cited" | "comp" | "none" | "error";
@@ -15,6 +17,8 @@ export type MatrixCell = {
   status: CellStatus;
   /** When ``status`` is ``cited``: 1-based rank of the best (earliest) brand URL in the engine's citation list (``1`` = first / "top"). */
   position?: number;
+  /** ``top`` | ``lower`` — matches gap classifier ``CITED_TOP`` / ``CITED_LOWER`` (API may omit on older snapshots). */
+  brandTier?: "top" | "lower";
   /** Total citations returned by this engine for this prompt (may be > citations.length). */
   citationsCount?: number;
   /** Top citations (max 8), pre-sorted brand > competitor > neutral. */
@@ -38,6 +42,25 @@ export type ScanSnapshot = {
   prompts: { id: string; text: string; locale: string }[];
   matrix: { cells: MatrixCell[] };
   progress: { per_engine: Record<string, { done: number; total: number }> };
+  competitor_discovery?: CompetitorDiscoveryResult | null;
+  competitor_discovery_pending?: boolean;
+  competitor_discovery_status?: string | null;
+  user_provided_competitors?: {
+    domain: string;
+    name: string;
+    level: string;
+    tier?: string;
+    source?: string;
+  }[];
+  analysis_competitors?: {
+    domain: string;
+    name: string;
+    level: string;
+    tier?: string;
+    rank?: number | null;
+    source?: string;
+  }[];
+  competitors?: { id: string; name: string; domains: string }[];
 };
 
 export type ScanEvent =
@@ -53,4 +76,6 @@ export type ScanEvent =
       errorMessage?: string | null;
     }
   | { type: "scan.eta"; etaSeconds: number }
-  | { type: "scan.completed"; score: number };
+  | { type: "scan.completed"; score: number }
+  | { type: "competitor.discovery.started" }
+  | { type: "competitor.discovery.ready" };

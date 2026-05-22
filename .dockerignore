@@ -1,14 +1,26 @@
-# Used when Railway build context is the monorepo root (backend/Dockerfile).
+# Monorepo root build context (Railway Dockerfile path apps/api/Dockerfile or apps/web/Dockerfile).
 .git
-.venv
+.github
+.cursor
+.vscode
+.idea
+**/.venv
 **/__pycache__
 **/.pytest_cache
 **/.mypy_cache
 **/.ruff_cache
 **/.next
 **/node_modules
-_MConverter.eu_*
-*.md
-!backend/README.md
 .env
 .env.*
+!.env.example
+!.env.railway.example
+**/*.log
+tmp-*.json
+.dev-api-port
+playwright-report
+test-results
+coverage
+agent-tools
+terminals
+_MConverter.eu_*

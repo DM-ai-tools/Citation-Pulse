@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { EngineProgressRow } from "./EngineProgressRow";
 import { PromptStreamPills } from "./PromptStreamPills";
+import { scanReadyForReport } from "@/lib/matrixStats";
 import type { ScanSnapshot } from "@/types/scan";
 
 export function ScanProgressColumn({ data, scanId }: { data: ScanSnapshot; scanId: string }) {
@@ -17,6 +18,12 @@ export function ScanProgressColumn({ data, scanId }: { data: ScanSnapshot; scanI
   }
   const overallDone = Math.min(done, total);
   const pct = total ? Math.round((100 * overallDone) / total) : 0;
+  const canOpenReport = scanReadyForReport(
+    data.status,
+    data.prompts,
+    data.engines,
+    data.matrix.cells,
+  );
   const brand = data.brand?.name ?? data.submitted_url.replace(/^https?:\/\//, "").split("/")[0] ?? "your brand";
   const root = data.submitted_url.replace(/^https?:\/\//, "").split("/")[0];
   const etaSec = Math.min(120, 12 + total * 3);
@@ -86,6 +93,17 @@ export function ScanProgressColumn({ data, scanId }: { data: ScanSnapshot; scanI
       </div>
 
       <PromptStreamPills data={data} />
+
+      {canOpenReport ? (
+        <div className="mt-6 flex justify-center">
+          <Link
+            href={`/report/${scanId}`}
+            className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-[#1fb36b] to-[#32d882] px-6 py-3 font-display text-sm font-bold text-white shadow-md hover:opacity-95"
+          >
+            View citation report →
+          </Link>
+        </div>
+      ) : null}
 
       <p className="mt-6 text-center text-[11.5px] text-tr-mute">
         Your citation matrix is filling in on the right →{" "}
